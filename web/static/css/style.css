@@ -1,0 +1,98 @@
+/* Custom styles for Atlassian Marketplace Scraper */
+
+body {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    background-color: #f8f9fa;
+}
+
+main {
+    flex: 1;
+}
+
+.footer {
+    margin-top: auto;
+}
+
+/* Card hover effect */
+.hover-shadow {
+    transition: box-shadow 0.3s ease-in-out;
+}
+
+.hover-shadow:hover {
+    box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
+}
+
+/* Logo placeholder styling */
+.img-thumbnail {
+    object-fit: contain;
+}
+
+/* Table improvements */
+.table tbody tr {
+    vertical-align: middle;
+}
+
+/* Badge spacing */
+.badge {
+    margin-right: 0.25rem;
+}
+
+/* Navbar branding */
+.navbar-brand {
+    font-weight: 600;
+}
+
+/* Card header improvements */
+.card-header h5 {
+    margin-bottom: 0;
+}
+
+/* Pagination improvements */
+.pagination {
+    margin-top: 1.5rem;
+}
+
+/* Alert improvements */
+.alert code {
+    background-color: rgba(255, 255, 255, 0.2);
+    padding: 0.2rem 0.4rem;
+    border-radius: 0.25rem;
+}
+
+/* Stats cards */
+.card-body h2 {
+    font-weight: bold;
+    margin-bottom: 0.5rem;
+}
+
+/* Search form */
+form .row {
+    align-items: end;
+}
+
+/* Responsive tables */
+@media (max-width: 768px) {
+    .table {
+        font-size: 0.875rem;
+    }
+
+    .btn-sm {
+        font-size: 0.75rem;
+        padding: 0.25rem 0.5rem;
+    }
+}
+
+/* Loading spinner */
+.spinner-border-sm {
+    width: 1rem;
+    height: 1rem;
+    border-width: 0.2em;
+}
+
+/* Breadcrumb styling */
+.breadcrumb {
+    background-color: transparent;
+    padding: 0;
+}

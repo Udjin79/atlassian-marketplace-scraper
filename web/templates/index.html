@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Atlassian Marketplace Scraper{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h1 class="mb-4"><i class="bi bi-speedometer2"></i> Dashboard</h1>
+    </div>
+</div>
+
+<!-- Statistics Cards -->
+<div class="row g-4 mb-4">
+    <div class="col-md-3">
+        <div class="card border-primary">
+            <div class="card-body">
+                <h5 class="card-title text-primary">
+                    <i class="bi bi-app"></i> Total Apps
+                </h5>
+                <h2 class="card-text">{{ stats.total_apps }}</h2>
+                <small class="text-muted">Across all products</small>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-3">
+        <div class="card border-success">
+            <div class="card-body">
+                <h5 class="card-title text-success">
+                    <i class="bi bi-tags"></i> Total Versions
+                </h5>
+                <h2 class="card-text">{{ stats.total_versions }}</h2>
+                <small class="text-muted">Last 1 year</small>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-3">
+        <div class="card border-info">
+            <div class="card-body">
+                <h5 class="card-title text-info">
+                    <i class="bi bi-download"></i> Downloaded
+                </h5>
+                <h2 class="card-text">{{ stats.downloaded_versions }}</h2>
+                <small class="text-muted">
+                    {% if stats.total_versions > 0 %}
+                        {{ "%.1f"|format((stats.downloaded_versions / stats.total_versions * 100)) }}% complete
+                    {% else %}
+                        0% complete
+                    {% endif %}
+                </small>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-3">
+        <div class="card border-warning">
+            <div class="card-body">
+                <h5 class="card-title text-warning">
+                    <i class="bi bi-hdd"></i> Storage Used
+                </h5>
+                <h2 class="card-text">
+                    {% if stats.storage_used_gb >= 1.0 %}
+                        {{ "%.2f"|format(stats.storage_used_gb) }} GB
+                    {% else %}
+                        {{ "%.0f"|format(stats.storage_used_mb) }} MB
+                    {% endif %}
+                </h2>
+                <small class="text-muted">{{ stats.file_count }} files</small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Products Overview -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header bg-dark text-white">
+                <h5 class="mb-0"><i class="bi bi-box-seam"></i> Products</h5>
+            </div>
+            <div class="card-body">
+                <div class="row g-3">
+                    {% for key, product in products.items() %}
+                    <div class="col-md-4">
+                        <a href="{{ url_for('apps_list', product=key) }}" class="text-decoration-none">
+                            <div class="card h-100 hover-shadow">
+                                <div class="card-body text-center">
+                                    <h5 class="card-title">{{ product.name }}</h5>
+                                    <p class="card-text text-muted small">
+                                        {{ product.full_name }}
+                                    </p>
+                                </div>
+                            </div>
+                        </a>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Quick Actions -->
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header bg-dark text-white">
+                <h5 class="mb-0"><i class="bi bi-lightning"></i> Quick Actions</h5>
+            </div>
+            <div class="card-body">
+                <a href="{{ url_for('apps_list') }}" class="btn btn-primary me-2">
+                    <i class="bi bi-grid-3x3"></i> Browse All Apps
+                </a>
+                <a href="{{ url_for('api_stats') }}" class="btn btn-outline-secondary" target="_blank">
+                    <i class="bi bi-file-earmark-code"></i> View API Stats
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% if stats.total_apps == 0 %}
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="alert alert-info" role="alert">
+            <h5 class="alert-heading"><i class="bi bi-info-circle"></i> No Data Yet</h5>
+            <p>No apps have been scraped yet. Run the scraper to populate the database.</p>
+            <hr>
+            <p class="mb-0">
+                <strong>Usage:</strong><br>
+                <code>python -m scraper.app_scraper</code> - Scrape apps<br>
+                <code>python -m scraper.version_scraper</code> - Scrape versions<br>
+                <code>python -m scraper.download_manager</code> - Download binaries
+            </p>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{% endblock %}
