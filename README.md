@@ -10,8 +10,7 @@ A Python-based service to scrape the Atlassian Marketplace for Server/Data Cente
 - **Web Interface**: Flask-based UI for browsing apps and versions
 - **Checkpoint/Resume**: Robust checkpoint system for interrupted scraping
 - **Concurrent Downloads**: Multi-threaded downloads with configurable concurrency
-- **Progress Tracking**: Real-time progress bars using tqdm
-- **Metadata Storage**: JSON-based storage for apps and versions
+- **Metadata Storage**: SQLite database for apps and versions
 
 ## Architecture
 
@@ -36,7 +35,7 @@ AtlassianMarketplaceScraper/
 │   ├── templates/              # HTML templates
 │   └── static/                 # CSS/JS assets
 └── data/                       # Downloaded data
-    ├── metadata/               # JSON metadata
+    ├── metadata/               # SQLite metadata + checkpoints
     └── binaries/               # JAR/OBR files
 ```
 
@@ -89,7 +88,7 @@ python run_scraper.py
 - `--resume`: Resume from last checkpoint after interruption
 
 **Output:**
-- Apps metadata saved to `data/metadata/apps.json`
+- Apps metadata saved to `data/metadata/marketplace.db`
 - Progress automatically checkpointed every 100 apps
 
 ### Step 2: Scrape Versions
@@ -101,7 +100,7 @@ python run_version_scraper.py
 ```
 
 **Output:**
-- Version metadata saved to `data/metadata/versions/{app_key}_versions.json`
+- Version metadata saved to `data/metadata/marketplace.db`
 - Versions filtered by date (last 365 days) and hosting type
 
 ### Step 3: Download Binaries
@@ -176,10 +175,11 @@ The web interface provides REST API endpoints:
 
 ## Data Storage
 
-### Metadata (JSON)
+### Metadata
 
 ```
 data/metadata/
+├── marketplace.db              # Apps and versions
 ├── apps.json                   # All apps (array)
 ├── versions/                   # Versions per app
 │   └── {app_key}_versions.json
@@ -235,7 +235,6 @@ Logs are written to `logs/` directory:
 ### Key Patterns
 
 - **Checkpoint/Resume**: Uses pickle for state persistence (pattern from `converter/main.py`)
-- **Progress Tracking**: tqdm progress bars for long operations
 - **Rate Limiting**: Adaptive delays based on HTTP response codes
 - **Error Logging**: File-based logging with ERROR level for failures
 
@@ -253,7 +252,7 @@ Logs are written to `logs/` directory:
 
 ### Web interface errors
 - Ensure scraping completed successfully
-- Check `data/metadata/apps.json` exists
+- Check `data/metadata/marketplace.db` exists
 - Review Flask logs in console
 
 ## Performance
