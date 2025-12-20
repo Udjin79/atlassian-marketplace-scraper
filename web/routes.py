@@ -7,6 +7,8 @@ from config.products import PRODUCTS, PRODUCT_LIST
 from scraper.metadata_store import MetadataStore
 from scraper.download_manager import DownloadManager
 from utils.logger import get_logger
+from utils.task_manager import get_task_manager
+from utils.settings_manager import read_env_settings, update_env_setting
 
 logger = get_logger('web')
 
@@ -37,8 +39,7 @@ def register_routes(app):
                 'file_count': storage_stats.get('file_count', 0)
             }
 
-            return render_template('index.html', stats=stats, products=PRODUCTS,
-                                 version_age_days=settings.VERSION_AGE_LIMIT_DAYS)
+            return render_template('index.html', stats=stats, products=PRODUCTS)
 
         except Exception as e:
             logger.error(f"Error loading dashboard: {str(e)}")
@@ -108,8 +109,7 @@ def register_routes(app):
             return render_template(
                 'app_detail.html',
                 app=app,
-                versions=versions,
-                version_age_days=settings.VERSION_AGE_LIMIT_DAYS
+                versions=versions
             )
 
         except Exception as e:
@@ -120,8 +120,9 @@ def register_routes(app):
     def download_binary(product, addon_key, version_id):
         """Download a binary file."""
         try:
-            # Find the file
-            binary_dir = os.path.join(settings.BINARIES_DIR, product, addon_key, version_id)
+            # Find the file using product-specific storage
+            product_binaries_dir = settings.get_binaries_dir_for_product(product)
+            binary_dir = os.path.join(product_binaries_dir, addon_key, version_id)
 
             if not os.path.exists(binary_dir):
                 return jsonify({'error': 'Binary not found'}), 404
@@ -228,6 +229,209 @@ def register_routes(app):
             'success': True,
             'products': PRODUCTS
         })
+
+    # Management Routes
+    
+    @app.route('/manage')
+    def manage():
+        """Management page for tasks and settings."""
+        try:
+            task_mgr = get_task_manager()
+            latest_tasks = {
+                'scrape_apps': task_mgr.get_latest_task('scrape_apps'),
+                'scrape_versions': task_mgr.get_latest_task('scrape_versions'),
+                'download': task_mgr.get_latest_task('download')
+            }
+            
+            # Get current settings (from .env if available, otherwise from settings)
+            env_settings = read_env_settings()
+            current_settings = {
+                'SCRAPER_BATCH_SIZE': env_settings.get('SCRAPER_BATCH_SIZE', str(settings.SCRAPER_BATCH_SIZE)),
+                'SCRAPER_REQUEST_DELAY': env_settings.get('SCRAPER_REQUEST_DELAY', str(settings.SCRAPER_REQUEST_DELAY)),
+                'VERSION_AGE_LIMIT_DAYS': env_settings.get('VERSION_AGE_LIMIT_DAYS', str(settings.VERSION_AGE_LIMIT_DAYS)),
+                'MAX_CONCURRENT_DOWNLOADS': env_settings.get('MAX_CONCURRENT_DOWNLOADS', str(settings.MAX_CONCURRENT_DOWNLOADS)),
+                'MAX_VERSION_SCRAPER_WORKERS': env_settings.get('MAX_VERSION_SCRAPER_WORKERS', str(settings.MAX_VERSION_SCRAPER_WORKERS)),
+                'MAX_RETRY_ATTEMPTS': env_settings.get('MAX_RETRY_ATTEMPTS', str(settings.MAX_RETRY_ATTEMPTS)),
+            }
+            
+            return render_template(
+                'manage.html',
+                latest_tasks=latest_tasks,
+                current_settings=current_settings,
+                products=PRODUCT_LIST
+            )
+        except Exception as e:
+            logger.error(f"Error loading management page: {str(e)}")
+            return render_template('error.html', error=str(e)), 500
+
+    @app.route('/api/tasks/start/scrape-apps', methods=['POST'])
+    def api_start_scrape_apps():
+        """Start app scraping task."""
+        try:
+            data = request.get_json() or {}
+            resume = data.get('resume', False)
+            
+            task_mgr = get_task_manager()
+            task_id = task_mgr.start_scrape_apps(resume=resume)
+            
+            return jsonify({
+                'success': True,
+                'task_id': task_id,
+                'message': 'App scraping started'
+            })
+        except Exception as e:
+            logger.error(f"Error starting scrape apps: {str(e)}")
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    @app.route('/api/tasks/start/scrape-versions', methods=['POST'])
+    def api_start_scrape_versions():
+        """Start version scraping task."""
+        try:
+            task_mgr = get_task_manager()
+            task_id = task_mgr.start_scrape_versions()
+            
+            return jsonify({
+                'success': True,
+                'task_id': task_id,
+                'message': 'Version scraping started'
+            })
+        except Exception as e:
+            logger.error(f"Error starting scrape versions: {str(e)}")
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    @app.route('/api/tasks/start/download', methods=['POST'])
+    def api_start_download():
+        """Start binary download task."""
+        try:
+            data = request.get_json() or {}
+            product = data.get('product')
+            
+            task_mgr = get_task_manager()
+            task_id = task_mgr.start_download_binaries(product=product)
+            
+            return jsonify({
+                'success': True,
+                'task_id': task_id,
+                'message': 'Binary download started'
+            })
+        except Exception as e:
+            logger.error(f"Error starting download: {str(e)}")
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    @app.route('/api/tasks/<task_id>')
+    def api_task_status(task_id):
+        """Get task status."""
+        try:
+            task_mgr = get_task_manager()
+            status = task_mgr.get_task_status(task_id)
+            
+            if not status:
+                return jsonify({'success': False, 'error': 'Task not found'}), 404
+            
+            return jsonify({
+                'success': True,
+                'task': status
+            })
+        except Exception as e:
+            logger.error(f"Error getting task status: {str(e)}")
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    @app.route('/api/tasks')
+    def api_all_tasks():
+        """Get all tasks."""
+        try:
+            task_mgr = get_task_manager()
+            tasks = task_mgr.get_all_tasks()
+            
+            return jsonify({
+                'success': True,
+                'tasks': tasks
+            })
+        except Exception as e:
+            logger.error(f"Error getting tasks: {str(e)}")
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    @app.route('/api/settings', methods=['GET'])
+    def api_get_settings():
+        """Get current settings."""
+        try:
+            settings_dict = {
+                'SCRAPER_BATCH_SIZE': settings.SCRAPER_BATCH_SIZE,
+                'SCRAPER_REQUEST_DELAY': settings.SCRAPER_REQUEST_DELAY,
+                'VERSION_AGE_LIMIT_DAYS': settings.VERSION_AGE_LIMIT_DAYS,
+                'MAX_CONCURRENT_DOWNLOADS': settings.MAX_CONCURRENT_DOWNLOADS,
+                'MAX_VERSION_SCRAPER_WORKERS': settings.MAX_VERSION_SCRAPER_WORKERS,
+                'MAX_RETRY_ATTEMPTS': settings.MAX_RETRY_ATTEMPTS,
+            }
+            
+            return jsonify({
+                'success': True,
+                'settings': settings_dict
+            })
+        except Exception as e:
+            logger.error(f"Error getting settings: {str(e)}")
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    @app.route('/api/settings', methods=['POST'])
+    def api_update_settings():
+        """Update settings in .env file."""
+        try:
+            data = request.get_json()
+            if not data:
+                return jsonify({'success': False, 'error': 'No data provided'}), 400
+            
+            # Allowed settings to update
+            allowed_settings = [
+                'SCRAPER_BATCH_SIZE',
+                'SCRAPER_REQUEST_DELAY',
+                'VERSION_AGE_LIMIT_DAYS',
+                'MAX_CONCURRENT_DOWNLOADS',
+                'MAX_VERSION_SCRAPER_WORKERS',
+                'MAX_RETRY_ATTEMPTS'
+            ]
+            
+            updated = []
+            errors = []
+            
+            for key, value in data.items():
+                if key not in allowed_settings:
+                    errors.append(f"Setting '{key}' is not allowed to be updated")
+                    continue
+                
+                # Validate value
+                try:
+                    if key in ['SCRAPER_BATCH_SIZE', 'MAX_CONCURRENT_DOWNLOADS', 
+                              'MAX_VERSION_SCRAPER_WORKERS', 'MAX_RETRY_ATTEMPTS', 
+                              'VERSION_AGE_LIMIT_DAYS']:
+                        int(value)  # Validate it's a number
+                    elif key == 'SCRAPER_REQUEST_DELAY':
+                        float(value)  # Validate it's a float
+                except (ValueError, TypeError):
+                    errors.append(f"Invalid value for '{key}': must be a number")
+                    continue
+                
+                # Update setting
+                if update_env_setting(key, str(value)):
+                    updated.append(key)
+                else:
+                    errors.append(f"Failed to update '{key}'")
+            
+            if errors:
+                return jsonify({
+                    'success': False,
+                    'errors': errors,
+                    'updated': updated
+                }), 400
+            
+            return jsonify({
+                'success': True,
+                'message': f'Updated {len(updated)} setting(s). Restart the application to apply changes.',
+                'updated': updated,
+                'note': 'You need to restart the Flask application for changes to take effect.'
+            })
+        except Exception as e:
+            logger.error(f"Error updating settings: {str(e)}")
+            return jsonify({'success': False, 'error': str(e)}), 500
 
     @app.errorhandler(404)
     def not_found(e):

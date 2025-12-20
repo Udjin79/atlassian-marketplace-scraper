@@ -83,8 +83,7 @@ class DownloadManager:
                     self._download_single_version,
                     item['app']['addon_key'],
                     item['version'],
-                    item['product'],
-                    item['app'].get('app_id')  # Pass app_id for correct download URLs
+                    item['product']
                 ): item
                 for item in download_queue
             }
@@ -110,7 +109,7 @@ class DownloadManager:
         print(f"   Failed: {failed}")
 
     def _download_single_version(self, addon_key: str, version: Dict,
-                                 product: str, app_id: Optional[str] = None) -> bool:
+                                 product: str) -> bool:
         """
         Download a single version binary.
 
@@ -118,7 +117,6 @@ class DownloadManager:
             addon_key: App key
             version: Version dictionary
             product: Product name for directory organization
-            app_id: Numeric app ID for download URLs
 
         Returns:
             True if successful, False otherwise
@@ -137,17 +135,17 @@ class DownloadManager:
             # Construct download URL
             download_url = version.get('download_url')
             if not download_url:
-                # Try to construct it using app_id (preferred) or addon_key (fallback)
-                download_url = self.api.get_download_url(addon_key, version_id, app_id=app_id)
+                # Try to construct it
+                download_url = self.api.get_download_url(addon_key, version_id)
 
             if not download_url:
                 logger.error(f"No download URL for {addon_key} v{version_name}")
                 return False
 
-            # Create save directory
+            # Create save directory using product-specific storage
+            product_binaries_dir = settings.get_binaries_dir_for_product(product)
             save_dir = os.path.join(
-                settings.BINARIES_DIR,
-                product,
+                product_binaries_dir,
                 addon_key,
                 str(version_id)
             )
@@ -247,11 +245,10 @@ class DownloadManager:
             return
 
         product = app.get('products', ['unknown'])[0]
-        app_id = app.get('app_id')
 
         print(f"🔄 Downloading {addon_key} v{version.get('version_name')}...")
 
-        success = self._download_single_version(addon_key, version, product, app_id)
+        success = self._download_single_version(addon_key, version, product)
 
         if success:
             print(f"✅ Download complete!")
@@ -260,22 +257,43 @@ class DownloadManager:
 
     def get_storage_stats(self) -> Dict:
         """
-        Get storage statistics.
+        Get storage statistics from all product-specific directories.
 
         Returns:
             Dictionary with storage stats
         """
         total_size = 0
         file_count = 0
+        
+        # Get all directories to check (product-specific + base fallback)
+        directories_to_check = set()
+        
+        # Add all product-specific directories
+        for product_dir in settings.PRODUCT_STORAGE_MAP.values():
+            if os.path.exists(product_dir):
+                directories_to_check.add(product_dir)
+        
+        # Also check base directory as fallback
+        if os.path.exists(settings.BINARIES_BASE_DIR):
+            directories_to_check.add(settings.BINARIES_BASE_DIR)
+        
+        # If no product-specific dirs exist, check default
+        if not directories_to_check and os.path.exists(settings.BINARIES_DIR):
+            directories_to_check.add(settings.BINARIES_DIR)
 
-        for root, dirs, files in os.walk(settings.BINARIES_DIR):
-            for file in files:
-                file_path = os.path.join(root, file)
-                try:
-                    total_size += os.path.getsize(file_path)
-                    file_count += 1
-                except OSError:
-                    pass
+        # Walk through all directories
+        for directory in directories_to_check:
+            if not os.path.exists(directory):
+                continue
+                
+            for root, dirs, files in os.walk(directory):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    try:
+                        total_size += os.path.getsize(file_path)
+                        file_count += 1
+                    except OSError:
+                        pass
 
         # Convert to human-readable format
         size_gb = total_size / (1024 ** 3)

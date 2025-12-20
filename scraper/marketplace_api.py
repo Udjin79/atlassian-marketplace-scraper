@@ -206,29 +206,25 @@ class MarketplaceAPI:
         logger.info(f"Retrieved {len(all_versions)} total versions for {addon_key}")
         return all_versions
 
-    def get_download_url(self, addon_key, version_id=None, build_number=None, app_id=None):
+    def get_download_url(self, addon_key, version_id=None, build_number=None):
         """
         Construct download URL for an app version.
 
         Args:
-            addon_key: The app's unique key (string)
+            addon_key: The app's unique key
             version_id: Version ID (if known)
             build_number: Build number (alternative to version_id)
-            app_id: Numeric app ID (preferred over addon_key for downloads)
 
         Returns:
             Download URL string
         """
-        # Prefer app_id (numeric) over addon_key (string) for download URLs
-        identifier = app_id if app_id else addon_key
-
         # Try to use version_id first
         if version_id:
-            return f"{self.download_base_url}/download/apps/{identifier}/version/{version_id}"
+            return f"{self.download_base_url}/download/apps/{addon_key}/version/{version_id}"
 
         # Fallback to build number pattern (less reliable)
         if build_number:
-            return f"{self.download_base_url}/download/apps/{identifier}/version/{build_number}"
+            return f"{self.download_base_url}/download/apps/{addon_key}/version/{build_number}"
 
         logger.warning(f"Cannot construct download URL for {addon_key}: no version_id or build_number provided")
         return None

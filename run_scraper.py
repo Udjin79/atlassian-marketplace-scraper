@@ -52,6 +52,9 @@ def main():
         scraper.scrape_all_products(resume=True)
         print("\n✅ App scraping completed successfully!")
         print(f"\n📊 Total apps: {store.get_apps_count()}")
+        print()
+        print("📋 Next step:")
+        print("   → Run version scraper: python run_version_scraper.py")
         return 0
 
     except KeyboardInterrupt:

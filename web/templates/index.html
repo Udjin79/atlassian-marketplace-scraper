@@ -30,13 +30,7 @@
                     <i class="bi bi-tags"></i> Total Versions
                 </h5>
                 <h2 class="card-text">{{ stats.total_versions }}</h2>
-                <small class="text-muted">
-                    {% if version_age_days >= 365 %}
-                        Last {{ (version_age_days / 365) | round(1) }} year{% if (version_age_days / 365) > 1.5 %}s{% endif %}
-                    {% else %}
-                        Last {{ version_age_days }} days
-                    {% endif %}
-                </small>
+                <small class="text-muted">Last 1 year</small>
             </div>
         </div>
     </div>
@@ -117,6 +111,9 @@
             <div class="card-body">
                 <a href="{{ url_for('apps_list') }}" class="btn btn-primary me-2">
                     <i class="bi bi-grid-3x3"></i> Browse All Apps
+                </a>
+                <a href="{{ url_for('manage') }}" class="btn btn-success me-2">
+                    <i class="bi bi-gear"></i> Management & Control
                 </a>
                 <a href="{{ url_for('api_stats') }}" class="btn btn-outline-secondary" target="_blank">
                     <i class="bi bi-file-earmark-code"></i> View API Stats

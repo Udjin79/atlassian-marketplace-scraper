@@ -1,0 +1,354 @@
+{% extends "base.html" %}
+
+{% block title %}Management - Atlassian Marketplace Scraper{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h2><i class="bi bi-gear"></i> Management & Control</h2>
+        <p class="text-muted">Manage scraper tasks and settings</p>
+    </div>
+</div>
+
+<!-- Task Control Section -->
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0"><i class="bi bi-play-circle"></i> Task Control</h5>
+            </div>
+            <div class="card-body">
+                <!-- Scrape Apps Task -->
+                <div class="mb-4 p-3 border rounded">
+                    <h6><i class="bi bi-collection"></i> 1. Scrape Apps</h6>
+                    <p class="text-muted small">Collect all apps from Atlassian Marketplace</p>
+                    <div class="d-flex gap-2 mb-2">
+                        <button id="btn-scrape-apps" class="btn btn-primary" onclick="startScrapeApps(false)">
+                            <i class="bi bi-play-fill"></i> Start Fresh
+                        </button>
+                        <button id="btn-scrape-apps-resume" class="btn btn-outline-primary" onclick="startScrapeApps(true)">
+                            <i class="bi bi-arrow-clockwise"></i> Resume
+                        </button>
+                    </div>
+                    <div id="status-scrape-apps" class="mt-2"></div>
+                </div>
+
+                <!-- Scrape Versions Task -->
+                <div class="mb-4 p-3 border rounded">
+                    <h6><i class="bi bi-tags"></i> 2. Scrape Versions</h6>
+                    <p class="text-muted small">Collect version information for all apps</p>
+                    <button id="btn-scrape-versions" class="btn btn-success" onclick="startScrapeVersions()">
+                        <i class="bi bi-play-fill"></i> Start
+                    </button>
+                    <div id="status-scrape-versions" class="mt-2"></div>
+                </div>
+
+                <!-- Download Binaries Task -->
+                <div class="mb-4 p-3 border rounded">
+                    <h6><i class="bi bi-download"></i> 3. Download Binaries</h6>
+                    <p class="text-muted small">Download JAR/OBR files for all versions</p>
+                    <div class="mb-2">
+                        <label for="download-product" class="form-label">Product (optional):</label>
+                        <select id="download-product" class="form-select form-select-sm" style="max-width: 200px;">
+                            <option value="">All Products</option>
+                            {% for product in products %}
+                            <option value="{{ product }}">{{ product|title }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <button id="btn-download" class="btn btn-warning" onclick="startDownload()">
+                        <i class="bi bi-play-fill"></i> Start Download
+                    </button>
+                    <div id="status-download" class="mt-2"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Settings Section -->
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header bg-secondary text-white">
+                <h5 class="mb-0"><i class="bi bi-sliders"></i> Settings</h5>
+            </div>
+            <div class="card-body">
+                <div class="alert alert-info">
+                    <i class="bi bi-info-circle"></i> 
+                    <strong>Note:</strong> To change settings, edit the <code>.env</code> file and restart the application.
+                    Current values are shown below for reference.
+                </div>
+                
+                <form id="settings-form">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="scraper_batch_size" class="form-label">Scraper Batch Size</label>
+                                <input type="number" class="form-control" id="scraper_batch_size" 
+                                       value="{{ current_settings.SCRAPER_BATCH_SIZE }}" min="1" max="100">
+                                <small class="text-muted">Apps per API request (default: 50)</small>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label for="scraper_request_delay" class="form-label">Request Delay (seconds)</label>
+                                <input type="number" class="form-control" id="scraper_request_delay" 
+                                       value="{{ current_settings.SCRAPER_REQUEST_DELAY }}" step="0.1" min="0.1">
+                                <small class="text-muted">Delay between API requests (default: 0.5)</small>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label for="version_age_limit_days" class="form-label">Version Age Limit (days)</label>
+                                <input type="number" class="form-control" id="version_age_limit_days" 
+                                       value="{{ current_settings.VERSION_AGE_LIMIT_DAYS }}" min="0">
+                                <small class="text-muted">Only versions from last N days (0 = all versions)</small>
+                            </div>
+                        </div>
+                        
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="max_concurrent_downloads" class="form-label">Max Concurrent Downloads</label>
+                                <input type="number" class="form-control" id="max_concurrent_downloads" 
+                                       value="{{ current_settings.MAX_CONCURRENT_DOWNLOADS }}" min="1" max="10">
+                                <small class="text-muted">Parallel download threads (default: 3)</small>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label for="max_version_scraper_workers" class="form-label">Version Scraper Workers</label>
+                                <input type="number" class="form-control" id="max_version_scraper_workers" 
+                                       value="{{ current_settings.MAX_VERSION_SCRAPER_WORKERS }}" min="1" max="20">
+                                <small class="text-muted">Parallel workers for version scraping (default: 10)</small>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label for="max_retry_attempts" class="form-label">Max Retry Attempts</label>
+                                <input type="number" class="form-control" id="max_retry_attempts" 
+                                       value="{{ current_settings.MAX_RETRY_ATTEMPTS }}" min="1" max="10">
+                                <small class="text-muted">Retry attempts for failed requests (default: 3)</small>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="d-flex gap-2">
+                        <button type="button" class="btn btn-primary" onclick="saveSettings()">
+                            <i class="bi bi-save"></i> Save Settings
+                        </button>
+                        <button type="button" class="btn btn-secondary" onclick="showSettingsNote()">
+                            <i class="bi bi-info-circle"></i> Info
+                        </button>
+                    </div>
+                    <div id="settings-message" class="mt-2"></div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Task History -->
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header bg-dark text-white">
+                <h5 class="mb-0"><i class="bi bi-clock-history"></i> Task Status</h5>
+            </div>
+            <div class="card-body">
+                <div id="task-status-container">
+                    <p class="text-muted">Loading task status...</p>
+                </div>
+                <button class="btn btn-sm btn-outline-secondary" onclick="refreshTaskStatus()">
+                    <i class="bi bi-arrow-clockwise"></i> Refresh
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Task management functions
+function startScrapeApps(resume) {
+    const btn = document.getElementById('btn-scrape-apps');
+    const statusDiv = document.getElementById('status-scrape-apps');
+    
+    btn.disabled = true;
+    statusDiv.innerHTML = '<div class="spinner-border spinner-border-sm me-2"></div>Starting...';
+    
+    fetch('/api/tasks/start/scrape-apps', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({resume: resume})
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            statusDiv.innerHTML = `<div class="alert alert-success"><i class="bi bi-check-circle"></i> Task started: ${data.task_id}</div>`;
+            setTimeout(() => refreshTaskStatus(), 2000);
+        } else {
+            statusDiv.innerHTML = `<div class="alert alert-danger">Error: ${data.error}</div>`;
+            btn.disabled = false;
+        }
+    })
+    .catch(e => {
+        statusDiv.innerHTML = `<div class="alert alert-danger">Error: ${e.message}</div>`;
+        btn.disabled = false;
+    });
+}
+
+function startScrapeVersions() {
+    const btn = document.getElementById('btn-scrape-versions');
+    const statusDiv = document.getElementById('status-scrape-versions');
+    
+    btn.disabled = true;
+    statusDiv.innerHTML = '<div class="spinner-border spinner-border-sm me-2"></div>Starting...';
+    
+    fetch('/api/tasks/start/scrape-versions', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'}
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            statusDiv.innerHTML = `<div class="alert alert-success"><i class="bi bi-check-circle"></i> Task started: ${data.task_id}</div>`;
+            setTimeout(() => refreshTaskStatus(), 2000);
+        } else {
+            statusDiv.innerHTML = `<div class="alert alert-danger">Error: ${data.error}</div>`;
+            btn.disabled = false;
+        }
+    })
+    .catch(e => {
+        statusDiv.innerHTML = `<div class="alert alert-danger">Error: ${e.message}</div>`;
+        btn.disabled = false;
+    });
+}
+
+function startDownload() {
+    const btn = document.getElementById('btn-download');
+    const statusDiv = document.getElementById('status-download');
+    const product = document.getElementById('download-product').value;
+    
+    btn.disabled = true;
+    statusDiv.innerHTML = '<div class="spinner-border spinner-border-sm me-2"></div>Starting...';
+    
+    fetch('/api/tasks/start/download', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({product: product || null})
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            statusDiv.innerHTML = `<div class="alert alert-success"><i class="bi bi-check-circle"></i> Task started: ${data.task_id}</div>`;
+            setTimeout(() => refreshTaskStatus(), 2000);
+        } else {
+            statusDiv.innerHTML = `<div class="alert alert-danger">Error: ${data.error}</div>`;
+            btn.disabled = false;
+        }
+    })
+    .catch(e => {
+        statusDiv.innerHTML = `<div class="alert alert-danger">Error: ${e.message}</div>`;
+        btn.disabled = false;
+    });
+}
+
+function refreshTaskStatus() {
+    const container = document.getElementById('task-status-container');
+    container.innerHTML = '<div class="spinner-border spinner-border-sm me-2"></div>Loading...';
+    
+    fetch('/api/tasks')
+    .then(r => r.json())
+    .then(data => {
+        if (data.success && Object.keys(data.tasks).length > 0) {
+            let html = '<div class="table-responsive"><table class="table table-sm"><thead><tr><th>Task ID</th><th>Script</th><th>Status</th><th>Started</th><th>Message</th></tr></thead><tbody>';
+            
+            // Sort by started_at descending
+            const tasks = Object.entries(data.tasks)
+                .sort((a, b) => (b[1].started_at || '').localeCompare(a[1].started_at || ''));
+            
+            tasks.slice(0, 10).forEach(([taskId, task]) => {
+                const statusClass = {
+                    'running': 'warning',
+                    'completed': 'success',
+                    'failed': 'danger'
+                }[task.status] || 'secondary';
+                
+                html += `<tr>
+                    <td><code>${taskId}</code></td>
+                    <td>${task.script || 'N/A'}</td>
+                    <td><span class="badge bg-${statusClass}">${task.status || 'unknown'}</span></td>
+                    <td>${task.started_at ? new Date(task.started_at).toLocaleString() : 'N/A'}</td>
+                    <td>${task.message || 'N/A'}</td>
+                </tr>`;
+            });
+            
+            html += '</tbody></table></div>';
+            container.innerHTML = html;
+        } else {
+            container.innerHTML = '<p class="text-muted">No tasks found</p>';
+        }
+    })
+    .catch(e => {
+        container.innerHTML = `<div class="alert alert-danger">Error loading tasks: ${e.message}</div>`;
+    });
+}
+
+function saveSettings() {
+    const messageDiv = document.getElementById('settings-message');
+    messageDiv.innerHTML = '<div class="spinner-border spinner-border-sm me-2"></div>Saving...';
+    
+    const settings = {
+        SCRAPER_BATCH_SIZE: document.getElementById('scraper_batch_size').value,
+        SCRAPER_REQUEST_DELAY: document.getElementById('scraper_request_delay').value,
+        VERSION_AGE_LIMIT_DAYS: document.getElementById('version_age_limit_days').value,
+        MAX_CONCURRENT_DOWNLOADS: document.getElementById('max_concurrent_downloads').value,
+        MAX_VERSION_SCRAPER_WORKERS: document.getElementById('max_version_scraper_workers').value,
+        MAX_RETRY_ATTEMPTS: document.getElementById('max_retry_attempts').value
+    };
+    
+    fetch('/api/settings', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(settings)
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            messageDiv.innerHTML = `<div class="alert alert-success"><i class="bi bi-check-circle"></i> ${data.message}</div>`;
+        } else {
+            const errors = data.errors ? data.errors.join('<br>') : data.error;
+            messageDiv.innerHTML = `<div class="alert alert-danger"><i class="bi bi-exclamation-triangle"></i> ${errors}</div>`;
+        }
+    })
+    .catch(e => {
+        messageDiv.innerHTML = `<div class="alert alert-danger">Error: ${e.message}</div>`;
+    });
+}
+
+function showSettingsNote() {
+    alert('Settings Information:\n\n' +
+          '• Settings are saved to .env file\n' +
+          '• You need to restart the Flask application for changes to take effect\n' +
+          '• Current values are shown from .env file\n' +
+          '• Some settings may require restarting running tasks');
+}
+
+// Auto-refresh task status every 5 seconds if page is visible
+let refreshInterval;
+document.addEventListener('DOMContentLoaded', function() {
+    refreshTaskStatus();
+    refreshInterval = setInterval(refreshTaskStatus, 5000);
+});
+
+// Stop refreshing when page is hidden
+document.addEventListener('visibilitychange', function() {
+    if (document.hidden) {
+        if (refreshInterval) clearInterval(refreshInterval);
+    } else {
+        refreshTaskStatus();
+        refreshInterval = setInterval(refreshTaskStatus, 5000);
+    }
+});
+</script>
+{% endblock %}
+

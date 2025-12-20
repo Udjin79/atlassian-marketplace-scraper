@@ -8,7 +8,6 @@ from scraper.metadata_store import MetadataStore
 from config.products import PRODUCT_LIST
 from config import settings
 from utils.logger import setup_logging
-from utils.storage_reindex import StorageReindexer
 
 
 def main():
@@ -27,9 +26,20 @@ def main():
 
     # Check if versions exist
     versions_count = store.get_total_versions_count()
+    apps_count = store.get_apps_count()
     if versions_count == 0:
         print("❌ Error: No versions found in metadata store")
-        print("   Run version scraper first: python run_version_scraper.py")
+        print()
+        print("📋 Workflow steps:")
+        print("   1. ✅ Collect apps:        python run_scraper.py")
+        print("   2. ⏳ Collect versions:    python run_version_scraper.py  <-- You are here")
+        print("   3. ⏸️  Download binaries:  python run_downloader.py")
+        print()
+        if apps_count > 0:
+            print(f"   ✓ Found {apps_count} apps - ready for version scraping")
+            print("   → Run: python run_version_scraper.py")
+        else:
+            print("   → First run: python run_scraper.py")
         return 1
 
     # Parse command line arguments
@@ -59,12 +69,6 @@ def main():
 
     print(f"📊 Total versions in metadata: {versions_count}")
     print(f"💾 Max concurrent downloads: {settings.MAX_CONCURRENT_DOWNLOADS}")
-    print()
-
-    # Reindex storage to sync metadata with actual files
-    print("🔄 Reindexing storage...")
-    reindexer = StorageReindexer(store)
-    reindex_stats = reindexer.reindex(verbose=True)
     print()
 
     # Run downloader
