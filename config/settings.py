@@ -5,12 +5,42 @@ from decouple import config
 
 # Base directories
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR = os.path.join(BASE_DIR, 'data')
-METADATA_DIR = os.path.join(DATA_DIR, 'metadata')
-LOGS_DIR = os.path.join(BASE_DIR, 'logs')
 
-# Binaries directory (configurable for separate storage/drive)
-BINARIES_DIR = config('BINARIES_PATH', default=os.path.join(DATA_DIR, 'binaries'))
+# Custom storage paths (can be set via environment variables)
+# If not set, defaults to project directory
+DATA_BASE_DIR = config('DATA_BASE_DIR', default=BASE_DIR)
+DATA_DIR = os.path.join(DATA_BASE_DIR, 'data')
+METADATA_DIR = config('METADATA_DIR', default=os.path.join(DATA_DIR, 'metadata'))
+BINARIES_DIR = config('BINARIES_DIR', default=os.path.join(DATA_DIR, 'binaries'))
+BINARIES_BASE_DIR = config('BINARIES_BASE_DIR', default=BINARIES_DIR)
+LOGS_DIR = config('LOGS_DIR', default=os.path.join(BASE_DIR, 'logs'))
+
+# Product-specific binary storage mapping
+# Maps products to different drives for distributed storage
+PRODUCT_STORAGE_MAP = {
+    'jira': config('BINARIES_DIR_JIRA', default=os.path.join(BINARIES_BASE_DIR, 'jira')),
+    'confluence': config('BINARIES_DIR_CONFLUENCE', default=os.path.join(BINARIES_BASE_DIR, 'confluence')),
+    'bitbucket': config('BINARIES_DIR_BITBUCKET', default=os.path.join(BINARIES_BASE_DIR, 'bitbucket')),
+    'bamboo': config('BINARIES_DIR_BAMBOO', default=os.path.join(BINARIES_BASE_DIR, 'bamboo')),
+    'crowd': config('BINARIES_DIR_CROWD', default=os.path.join(BINARIES_BASE_DIR, 'crowd')),
+}
+
+
+def get_binaries_dir_for_product(product: str) -> str:
+    """
+    Get the storage directory for a specific product.
+    
+    Args:
+        product: Product name (jira, confluence, bitbucket, bamboo, crowd)
+        
+    Returns:
+        Path to the product's binary storage directory
+    """
+    product_lower = product.lower()
+    if product_lower in PRODUCT_STORAGE_MAP:
+        return PRODUCT_STORAGE_MAP[product_lower]
+    # Fallback to default
+    return os.path.join(BINARIES_BASE_DIR, product_lower)
 
 # Marketplace API Credentials
 MARKETPLACE_USERNAME = config('MARKETPLACE_USERNAME', default='')
@@ -45,8 +75,12 @@ CHECKPOINT_FILE = os.path.join(CHECKPOINTS_DIR, 'scrape_checkpoint.pkl')
 
 # Database configuration
 USE_SQLITE = config('USE_SQLITE', default=False, cast=bool)
-DATABASE_PATH = os.path.join(METADATA_DIR, 'marketplace.db')
+DATABASE_PATH = config('DATABASE_PATH', default=os.path.join(METADATA_DIR, 'marketplace.db'))
 
 # Ensure directories exist
 for directory in [METADATA_DIR, VERSIONS_DIR, CHECKPOINTS_DIR, BINARIES_DIR, LOGS_DIR]:
     os.makedirs(directory, exist_ok=True)
+
+# Ensure product-specific binary directories exist
+for product_dir in PRODUCT_STORAGE_MAP.values():
+    os.makedirs(product_dir, exist_ok=True)

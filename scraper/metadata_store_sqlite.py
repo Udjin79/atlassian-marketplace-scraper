@@ -37,7 +37,6 @@ class MetadataStoreSQLite:
                     name TEXT NOT NULL,
                     vendor TEXT,
                     description TEXT,
-                    app_id TEXT,
                     logo_url TEXT,
                     marketplace_url TEXT,
                     products TEXT,
@@ -50,14 +49,6 @@ class MetadataStoreSQLite:
                     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
                 )
             """)
-
-            # Migration: Add app_id column if it doesn't exist
-            try:
-                conn.execute("ALTER TABLE apps ADD COLUMN app_id TEXT")
-                logger.info("Added app_id column to apps table")
-            except sqlite3.OperationalError:
-                # Column already exists
-                pass
 
             # Create versions table
             conn.execute("""
@@ -72,6 +63,7 @@ class MetadataStoreSQLite:
                     release_notes TEXT,
                     summary TEXT,
                     compatible_products TEXT,
+                    compatibility TEXT,
                     hosting_type TEXT,
                     download_url TEXT,
                     file_name TEXT,
@@ -85,6 +77,14 @@ class MetadataStoreSQLite:
                     UNIQUE(addon_key, version_id)
                 )
             """)
+            
+            # Migration: Add compatibility column if it doesn't exist
+            try:
+                conn.execute("ALTER TABLE versions ADD COLUMN compatibility TEXT")
+                logger.debug("Added compatibility column to versions table")
+            except sqlite3.OperationalError:
+                # Column already exists, ignore
+                pass
 
             # Create parent_software_versions table
             conn.execute("""
@@ -164,16 +164,15 @@ class MetadataStoreSQLite:
 
             conn.execute("""
                 INSERT OR REPLACE INTO apps (
-                    addon_key, name, vendor, description, app_id, logo_url,
+                    addon_key, name, vendor, description, logo_url,
                     marketplace_url, products, hosting, categories,
                     last_updated, total_versions, scraped_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
             """, (
                 app.addon_key,
                 app.name,
                 app.vendor,
                 app.description,
-                app.app_id,
                 app.logo_url,
                 marketplace_url,
                 json.dumps(app.products),
@@ -212,16 +211,15 @@ class MetadataStoreSQLite:
 
                 conn.execute("""
                     INSERT OR REPLACE INTO apps (
-                        addon_key, name, vendor, description, app_id, logo_url,
+                        addon_key, name, vendor, description, logo_url,
                         marketplace_url, products, hosting, categories,
                         last_updated, total_versions, scraped_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
                 """, (
                     app.addon_key,
                     app.name,
                     app.vendor,
                     app.description,
-                    app.app_id,
                     app.logo_url,
                     marketplace_url,
                     json.dumps(app.products),

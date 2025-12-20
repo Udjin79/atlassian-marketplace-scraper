@@ -5,7 +5,6 @@ import sys
 from scraper.version_scraper import VersionScraper
 from scraper.metadata_store import MetadataStore
 from config import settings
-from config.products import PRODUCT_LIST
 from utils.logger import setup_logging
 
 
@@ -24,50 +23,24 @@ def main():
     print("=" * 60)
     print()
 
-    # Parse command line arguments
-    product_filter = None
-    if len(sys.argv) > 1:
-        arg = sys.argv[1].lower()
-
-        if arg == '--help' or arg == '-h':
-            print("Usage: python run_version_scraper.py [product]")
-            print()
-            print("Products:")
-            for product in PRODUCT_LIST:
-                print(f"  {product}")
-            print()
-            print("Examples:")
-            print("  python run_version_scraper.py          # Scrape all products")
-            print("  python run_version_scraper.py crowd    # Scrape Crowd apps only")
-            return 0
-
-        elif arg in PRODUCT_LIST:
-            product_filter = arg
-            print(f"🎯 Filtering by product: {product_filter}")
-        else:
-            print(f"❌ Error: Unknown product '{arg}'")
-            print(f"   Valid products: {', '.join(PRODUCT_LIST)}")
-            return 1
-
     # Initialize components
     store = MetadataStore()
     scraper = VersionScraper(store=store)
 
-    # Get apps with optional product filter
-    if product_filter:
-        apps_count = store.get_apps_count({'product': product_filter})
-    else:
-        apps_count = store.get_apps_count()
-
+    # Check if apps exist
+    apps_count = store.get_apps_count()
     if apps_count == 0:
-        if product_filter:
-            print(f"❌ Error: No {product_filter} apps found in metadata store")
-        else:
-            print("❌ Error: No apps found in metadata store")
-        print("   Run app scraper first: python run_scraper.py")
+        print("❌ Error: No apps found in metadata store")
+        print()
+        print("📋 Workflow steps:")
+        print("   1. ⏳ Collect apps:        python run_scraper.py  <-- Run this first")
+        print("   2. ⏸️  Collect versions:    python run_version_scraper.py")
+        print("   3. ⏸️  Download binaries:  python run_downloader.py")
+        print()
+        print("   → Run: python run_scraper.py")
         return 1
 
-    print(f"📦 Found {apps_count} apps")
+    print(f"📦 Found {apps_count} apps in metadata store")
     print(f"⏳ Scraping versions (filtering: last {settings.VERSION_AGE_LIMIT_DAYS} days, Server/DC only)...")
     print()
 
@@ -79,12 +52,15 @@ def main():
         scraper.scrape_all_app_versions(
             filter_date=True,
             filter_hosting=True,
-            max_workers=max_workers,
-            product_filter=product_filter
+            max_workers=max_workers
         )
 
         print("\n✅ Version scraping completed successfully!")
         scraper.get_versions_summary()
+        print()
+        print("📋 Next step:")
+        print("   → Download binaries: python run_downloader.py")
+        print("   → Or download specific product: python run_downloader.py jira")
         return 0
 
     except KeyboardInterrupt:

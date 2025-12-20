@@ -13,7 +13,6 @@ class App:
     name: str
     vendor: str
     description: str
-    app_id: Optional[str] = None  # Numeric app ID for download URLs
     logo_url: Optional[str] = None
     marketplace_url: Optional[str] = None
     products: List[str] = field(default_factory=list)
@@ -106,7 +105,6 @@ class App:
             name=api_data.get('name', ''),
             vendor=vendor,
             description=api_data.get('summary', ''),
-            app_id=str(api_data.get('id', '')) if api_data.get('id') else None,
             logo_url=api_data.get('logoUrl') or api_data.get('logo', {}).get('url'),
             marketplace_url=marketplace_url,
             products=products,

@@ -2,6 +2,11 @@
 
 A Python-based service to scrape the Atlassian Marketplace for Server/Data Center apps and versions, download binaries, and provide a web interface for browsing the collected data.
 
+## Documentation
+
+- **[ARCHITECTURE.md](ARCHITECTURE.md)** - Detailed technical architecture and component documentation (in Russian)
+- **[USER_GUIDE.md](USER_GUIDE.md)** - Complete user guide with step-by-step instructions (in Russian)
+
 ## Features
 
 - **Complete Marketplace Scraping**: Scrapes all apps across Jira, Confluence, Bitbucket, Bamboo, and Crowd
@@ -20,7 +25,6 @@ AtlassianMarketplaceScraper/
 ├── run_scraper.py              # CLI: Scrape apps
 ├── run_version_scraper.py      # CLI: Scrape versions
 ├── run_downloader.py           # CLI: Download binaries
-├── run_reindex.py              # CLI: Reindex storage
 ├── config/                     # Configuration
 ├── scraper/                    # Core scraping logic
 │   ├── marketplace_api.py      # API client
@@ -45,9 +49,25 @@ AtlassianMarketplaceScraper/
 ### Prerequisites
 
 - Python 3.8+
-- Atlassian Marketplace credentials (optional for public API)
+- Atlassian Marketplace credentials (required for scraping)
 
-### Setup
+### Quick Setup (Windows)
+
+**Automated installation script:**
+```powershell
+.\install.ps1
+```
+
+The script will:
+- Check Python installation
+- Create virtual environment
+- Install all dependencies
+- Create `.env` file with configuration
+- Generate SECRET_KEY automatically
+
+See [SETUP_GUIDE.md](SETUP_GUIDE.md) for detailed instructions.
+
+### Manual Setup
 
 1. **Clone or navigate to the directory:**
    ```bash
@@ -66,128 +86,12 @@ AtlassianMarketplaceScraper/
    ```
 
 4. **Configure environment variables:**
-   ```bash
-   cp .env.example .env
-   # Edit .env with your credentials (optional for public data)
-   ```
+   Create `.env` file with your credentials and settings (see Configuration section)
+
 5. **Create basic folders (optional; created automatically on first run):**
    ```bash
    mkdir -p data/metadata/versions data/metadata/checkpoints data/binaries logs
    ```
-
-## Docker Deployment
-
-### Prerequisites
-
-- Docker 20.10+
-- Docker Compose 2.0+
-
-### Quick Start
-
-1. **Configure environment:**
-   ```bash
-   cp .env.example .env
-   # Edit .env with your credentials (optional for public data)
-   ```
-
-2. **Build and start the web interface:**
-   ```bash
-   docker-compose up -d web
-   ```
-
-   Access at http://localhost:5000
-
-### Running Scraper Scripts
-
-The scraper scripts use Docker profiles to avoid auto-starting:
-
-```bash
-# Step 1: Scrape apps
-docker-compose run --rm scraper
-
-# Step 2: Scrape versions (all products)
-docker-compose run --rm version-scraper
-
-# Step 2 (alternative): Scrape versions for specific product
-docker-compose run --rm version-scraper python run_version_scraper.py crowd
-
-# Step 3: Download binaries (all products)
-docker-compose run --rm downloader
-
-# Download specific product
-docker-compose run --rm downloader python run_downloader.py jira
-
-# Reindex storage (sync metadata with actual files on disk)
-docker-compose run --rm web python run_reindex.py
-
-# Reindex and clean orphaned files
-docker-compose run --rm web python run_reindex.py --clean-orphaned
-```
-
-**Note:** The downloader automatically runs reindexing before starting downloads.
-
-### Data Persistence
-
-Data and logs are automatically persisted via Docker volumes:
-- `./data/metadata` - Apps and versions metadata
-- `./data/binaries` - Downloaded JAR/OBR files (or custom path via `BINARIES_PATH`)
-- `./logs` - Application logs
-
-### Using External Drive for Binaries
-
-Binaries can be stored on a separate drive or shared storage (useful for large datasets):
-
-1. **Set the path in .env:**
-   ```bash
-   # For local external drive
-   BINARIES_PATH=/mnt/external-drive/atlassian-binaries
-
-   # For network share
-   BINARIES_PATH=/mnt/nas/atlassian-binaries
-   ```
-
-2. **Ensure the directory exists and has proper permissions:**
-   ```bash
-   mkdir -p /mnt/external-drive/atlassian-binaries
-   chmod 755 /mnt/external-drive/atlassian-binaries
-   ```
-
-3. **Start services normally:**
-   ```bash
-   docker-compose up -d web
-   ```
-
-The binaries will be downloaded to your specified path while metadata stays in `./data/metadata`.
-
-### Docker Commands
-
-```bash
-# View logs
-docker-compose logs -f web
-
-# Stop services
-docker-compose down
-
-# Rebuild after code changes
-docker-compose build
-
-# Force rebuild (no cache) - use after updates to ensure all changes are applied
-docker-compose build --no-cache
-
-# Remove all data (destructive)
-docker-compose down -v
-```
-
-**Important:** After pulling updates or modifying code, rebuild with `--no-cache` to ensure all changes are applied.
-
-### Docker Architecture
-
-- **web**: Flask application on port 5000 (always running)
-- **scraper**: App scraping service (on-demand via `run`)
-- **version-scraper**: Version scraping service (on-demand via `run`)
-- **downloader**: Binary download service (on-demand via `run`)
-
-All services share the same network and volumes for data consistency.
 
 ## Usage
 
@@ -208,15 +112,10 @@ python run_scraper.py
 
 ### Step 2: Scrape Versions
 
-Fetch version history for all apps (configurable age limit, Server/DC only):
+Fetch version history for all apps (last 1 year, Server/DC only):
 
 ```bash
-# Scrape all products
 python run_version_scraper.py
-
-# Scrape specific product only
-python run_version_scraper.py crowd
-python run_version_scraper.py jira
 ```
 
 **Output:**
@@ -240,33 +139,6 @@ python run_downloader.py jira
 - Automatic retry on failure (max 3 attempts)
 - Resume capability for interrupted downloads
 - Files organized by: `data/binaries/{product}/{app_key}/{version}/`
-- **Automatic reindexing** on start to sync metadata with actual files
-
-### Storage Reindexing
-
-If you manually add, remove, or move binary files, you can reindex the storage to sync metadata with actual files:
-
-```bash
-# Reindex storage (sync metadata with disk)
-python run_reindex.py
-
-# Reindex and remove orphaned files
-python run_reindex.py --clean-orphaned
-```
-
-**What reindexing does:**
-- Scans all versions marked as "downloaded" in metadata
-- Verifies that files actually exist on disk
-- Clears "downloaded" status for missing files
-- Optionally removes files not tracked in metadata
-
-**When to reindex:**
-- After manually deleting binary files
-- After moving the binaries directory
-- When download statistics seem incorrect
-- After restoring from backup
-
-**Note:** The download script automatically runs reindexing before starting downloads.
 
 ### Step 4: Launch Web Interface
 
@@ -301,9 +173,6 @@ MAX_CONCURRENT_DOWNLOADS=3         # Parallel downloads
 MAX_RETRY_ATTEMPTS=3               # Retry failed requests
 MAX_VERSION_SCRAPER_WORKERS=10     # Parallel version scraper workers
 
-# Storage Settings
-# BINARIES_PATH=/path/to/storage  # Custom path for binaries (default: ./data/binaries)
-
 # Flask Settings
 FLASK_PORT=5000
 FLASK_DEBUG=True
@@ -311,6 +180,23 @@ SECRET_KEY=your-secret-key
 
 # Storage Backend
 USE_SQLITE=True                   # True to use SQLite instead of JSON files
+
+# Custom Storage Paths (optional)
+# Set custom paths for storing data on different drives
+# Windows example: DATA_BASE_DIR=D:\marketplace-data
+# Linux/Mac example: DATA_BASE_DIR=/mnt/storage/marketplace-data
+# Or set individually:
+# METADATA_DIR=D:\marketplace\metadata
+# BINARIES_DIR=E:\marketplace-binaries
+# LOGS_DIR=C:\marketplace-logs
+# DATABASE_PATH=D:\marketplace\marketplace.db
+
+# Product-specific binary storage (distribute across multiple drives)
+# BINARIES_DIR_JIRA=H:\marketplace-binaries\jira
+# BINARIES_DIR_CONFLUENCE=K:\marketplace-binaries\confluence
+# BINARIES_DIR_BITBUCKET=V:\marketplace-binaries\bitbucket
+# BINARIES_DIR_BAMBOO=W:\marketplace-binaries\bamboo
+# BINARIES_DIR_CROWD=F:\marketplace-binaries\crowd
 ```
 
 ## API Endpoints
@@ -395,16 +281,7 @@ Logs are written to `logs/` directory:
 - Verify Marketplace API is accessible
 - Check logs in `logs/scraper.log`
 
-### Download failures (404 errors)
-- **If you see 404 errors for download URLs**, the `app_id` field may not be populated
-- **Solution:** Re-run the app scraper to populate `app_id` for all apps:
-  ```bash
-  docker-compose run --rm scraper  # or python run_scraper.py
-  ```
-- **Then rebuild Docker images** to ensure code changes are applied:
-  ```bash
-  docker-compose build --no-cache
-  ```
+### Download failures
 - Check available disk space
 - Review `logs/failed_downloads.log`
 - Retry with `python run_downloader.py`
