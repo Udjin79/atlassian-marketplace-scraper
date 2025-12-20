@@ -9,6 +9,7 @@ from scraper.download_manager import DownloadManager
 from utils.logger import get_logger
 from utils.task_manager import get_task_manager
 from utils.settings_manager import read_env_settings, update_env_setting
+from utils.auth import requires_auth
 
 logger = get_logger('web')
 
@@ -231,8 +232,9 @@ def register_routes(app):
         })
 
     # Management Routes
-    
+
     @app.route('/manage')
+    @requires_auth
     def manage():
         """Management page for tasks and settings."""
         try:
@@ -265,6 +267,7 @@ def register_routes(app):
             return render_template('error.html', error=str(e)), 500
 
     @app.route('/api/tasks/start/scrape-apps', methods=['POST'])
+    @requires_auth
     def api_start_scrape_apps():
         """Start app scraping task."""
         try:
@@ -284,6 +287,7 @@ def register_routes(app):
             return jsonify({'success': False, 'error': str(e)}), 500
 
     @app.route('/api/tasks/start/scrape-versions', methods=['POST'])
+    @requires_auth
     def api_start_scrape_versions():
         """Start version scraping task."""
         try:
@@ -300,6 +304,7 @@ def register_routes(app):
             return jsonify({'success': False, 'error': str(e)}), 500
 
     @app.route('/api/tasks/start/download', methods=['POST'])
+    @requires_auth
     def api_start_download():
         """Start binary download task."""
         try:
@@ -319,6 +324,7 @@ def register_routes(app):
             return jsonify({'success': False, 'error': str(e)}), 500
 
     @app.route('/api/tasks/<task_id>')
+    @requires_auth
     def api_task_status(task_id):
         """Get task status."""
         try:
@@ -337,6 +343,7 @@ def register_routes(app):
             return jsonify({'success': False, 'error': str(e)}), 500
 
     @app.route('/api/tasks')
+    @requires_auth
     def api_all_tasks():
         """Get all tasks."""
         try:
@@ -352,6 +359,7 @@ def register_routes(app):
             return jsonify({'success': False, 'error': str(e)}), 500
 
     @app.route('/api/settings', methods=['GET'])
+    @requires_auth
     def api_get_settings():
         """Get current settings."""
         try:
@@ -373,6 +381,7 @@ def register_routes(app):
             return jsonify({'success': False, 'error': str(e)}), 500
 
     @app.route('/api/settings', methods=['POST'])
+    @requires_auth
     def api_update_settings():
         """Update settings in .env file."""
         try:

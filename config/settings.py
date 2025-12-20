@@ -59,6 +59,10 @@ FLASK_DEBUG = config('FLASK_DEBUG', default=True, cast=bool)
 FLASK_PORT = config('FLASK_PORT', default=5000, cast=int)
 SECRET_KEY = config('SECRET_KEY', default='dev-secret-key-change-in-production')
 
+# Management Page Authentication
+ADMIN_USERNAME = config('ADMIN_USERNAME', default='admin')
+ADMIN_PASSWORD = config('ADMIN_PASSWORD', default='admin')
+
 # Logging Settings
 LOG_LEVEL = config('LOG_LEVEL', default='INFO')
 
