@@ -8,6 +8,7 @@ from scraper.metadata_store import MetadataStore
 from config.products import PRODUCT_LIST
 from config import settings
 from utils.logger import setup_logging
+from utils.storage_reindex import StorageReindexer
 
 
 def main():
@@ -58,6 +59,12 @@ def main():
 
     print(f"📊 Total versions in metadata: {versions_count}")
     print(f"💾 Max concurrent downloads: {settings.MAX_CONCURRENT_DOWNLOADS}")
+    print()
+
+    # Reindex storage to sync metadata with actual files
+    print("🔄 Reindexing storage...")
+    reindexer = StorageReindexer(store)
+    reindex_stats = reindexer.reindex(verbose=True)
     print()
 
     # Run downloader

@@ -20,6 +20,7 @@ AtlassianMarketplaceScraper/
 ├── run_scraper.py              # CLI: Scrape apps
 ├── run_version_scraper.py      # CLI: Scrape versions
 ├── run_downloader.py           # CLI: Download binaries
+├── run_reindex.py              # CLI: Reindex storage
 ├── config/                     # Configuration
 ├── scraper/                    # Core scraping logic
 │   ├── marketplace_api.py      # API client
@@ -112,7 +113,15 @@ docker-compose run --rm downloader
 
 # Download specific product
 docker-compose run --rm downloader python run_downloader.py jira
+
+# Reindex storage (sync metadata with actual files on disk)
+docker-compose run --rm web python run_reindex.py
+
+# Reindex and clean orphaned files
+docker-compose run --rm web python run_reindex.py --clean-orphaned
 ```
+
+**Note:** The downloader automatically runs reindexing before starting downloads.
 
 ### Data Persistence
 
@@ -191,7 +200,7 @@ python run_scraper.py
 
 ### Step 2: Scrape Versions
 
-Fetch version history for all apps (last 1 year, Server/DC only):
+Fetch version history for all apps (configurable age limit, Server/DC only):
 
 ```bash
 python run_version_scraper.py
@@ -218,6 +227,33 @@ python run_downloader.py jira
 - Automatic retry on failure (max 3 attempts)
 - Resume capability for interrupted downloads
 - Files organized by: `data/binaries/{product}/{app_key}/{version}/`
+- **Automatic reindexing** on start to sync metadata with actual files
+
+### Storage Reindexing
+
+If you manually add, remove, or move binary files, you can reindex the storage to sync metadata with actual files:
+
+```bash
+# Reindex storage (sync metadata with disk)
+python run_reindex.py
+
+# Reindex and remove orphaned files
+python run_reindex.py --clean-orphaned
+```
+
+**What reindexing does:**
+- Scans all versions marked as "downloaded" in metadata
+- Verifies that files actually exist on disk
+- Clears "downloaded" status for missing files
+- Optionally removes files not tracked in metadata
+
+**When to reindex:**
+- After manually deleting binary files
+- After moving the binaries directory
+- When download statistics seem incorrect
+- After restoring from backup
+
+**Note:** The download script automatically runs reindexing before starting downloads.
 
 ### Step 4: Launch Web Interface
 

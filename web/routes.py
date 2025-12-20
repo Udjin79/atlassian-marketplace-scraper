@@ -37,7 +37,8 @@ def register_routes(app):
                 'file_count': storage_stats.get('file_count', 0)
             }
 
-            return render_template('index.html', stats=stats, products=PRODUCTS)
+            return render_template('index.html', stats=stats, products=PRODUCTS,
+                                 version_age_days=settings.VERSION_AGE_LIMIT_DAYS)
 
         except Exception as e:
             logger.error(f"Error loading dashboard: {str(e)}")
@@ -107,7 +108,8 @@ def register_routes(app):
             return render_template(
                 'app_detail.html',
                 app=app,
-                versions=versions
+                versions=versions,
+                version_age_days=settings.VERSION_AGE_LIMIT_DAYS
             )
 
         except Exception as e:

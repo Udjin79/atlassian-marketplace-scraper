@@ -30,7 +30,13 @@
                     <i class="bi bi-tags"></i> Total Versions
                 </h5>
                 <h2 class="card-text">{{ stats.total_versions }}</h2>
-                <small class="text-muted">Last 1 year</small>
+                <small class="text-muted">
+                    {% if version_age_days >= 365 %}
+                        Last {{ (version_age_days / 365) | round(1) }} year{% if (version_age_days / 365) > 1.5 %}s{% endif %}
+                    {% else %}
+                        Last {{ version_age_days }} days
+                    {% endif %}
+                </small>
             </div>
         </div>
     </div>
