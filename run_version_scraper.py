@@ -5,6 +5,7 @@ import sys
 from scraper.version_scraper import VersionScraper
 from scraper.metadata_store import MetadataStore
 from config import settings
+from config.products import PRODUCT_LIST
 from utils.logger import setup_logging
 
 
@@ -23,14 +24,46 @@ def main():
     print("=" * 60)
     print()
 
+    # Parse command line arguments
+    product_filter = None
+    if len(sys.argv) > 1:
+        arg = sys.argv[1].lower()
+
+        if arg == '--help' or arg == '-h':
+            print("Usage: python run_version_scraper.py [product]")
+            print()
+            print("Products:")
+            for product in PRODUCT_LIST:
+                print(f"  {product}")
+            print()
+            print("Examples:")
+            print("  python run_version_scraper.py          # Scrape all products")
+            print("  python run_version_scraper.py crowd    # Scrape Crowd apps only")
+            return 0
+
+        elif arg in PRODUCT_LIST:
+            product_filter = arg
+            print(f"🎯 Filtering by product: {product_filter}")
+        else:
+            print(f"❌ Error: Unknown product '{arg}'")
+            print(f"   Valid products: {', '.join(PRODUCT_LIST)}")
+            return 1
+
     # Initialize components
     store = MetadataStore()
     scraper = VersionScraper(store=store)
 
-    # Check if apps exist
-    apps_count = store.get_apps_count()
+    # Get apps with optional product filter
+    if product_filter:
+        apps_count = store.get_apps_count({'product': product_filter})
+    else:
+        apps_count = store.get_apps_count()
+
     if apps_count == 0:
-        print("❌ Error: No apps found in metadata store")
+        if product_filter:
+            print(f"❌ Error: No {product_filter} apps found in metadata store")
+        else:
+            print("❌ Error: No apps found in metadata store")
         print("   Run app scraper first: python run_scraper.py")
         return 1
 
@@ -46,7 +79,8 @@ def main():
         scraper.scrape_all_app_versions(
             filter_date=True,
             filter_hosting=True,
-            max_workers=max_workers
+            max_workers=max_workers,
+            product_filter=product_filter
         )
 
         print("\n✅ Version scraping completed successfully!")

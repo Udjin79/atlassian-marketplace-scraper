@@ -34,7 +34,8 @@ class VersionScraper:
 
     def scrape_all_app_versions(self, filter_date: bool = True,
                                 filter_hosting: bool = True,
-                                max_workers: int = 5):
+                                max_workers: int = 5,
+                                product_filter: Optional[str] = None):
         """
         Scrape versions for all apps in the metadata store (parallel).
 
@@ -42,8 +43,11 @@ class VersionScraper:
             filter_date: Whether to filter by date (last year)
             filter_hosting: Whether to filter by hosting type (server/datacenter)
             max_workers: Number of concurrent workers (default: 5)
+            product_filter: Optional product filter (e.g., 'crowd', 'jira')
         """
-        apps = self.store.get_all_apps()
+        # Get apps with optional product filter
+        filters = {'product': product_filter} if product_filter else None
+        apps = self.store.get_all_apps(filters)
 
         if not apps:
             print("❌ No apps found in metadata store. Run app scraper first.")

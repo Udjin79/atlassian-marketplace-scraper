@@ -83,7 +83,8 @@ class DownloadManager:
                     self._download_single_version,
                     item['app']['addon_key'],
                     item['version'],
-                    item['product']
+                    item['product'],
+                    item['app'].get('app_id')  # Pass app_id for correct download URLs
                 ): item
                 for item in download_queue
             }
@@ -109,7 +110,7 @@ class DownloadManager:
         print(f"   Failed: {failed}")
 
     def _download_single_version(self, addon_key: str, version: Dict,
-                                 product: str) -> bool:
+                                 product: str, app_id: Optional[str] = None) -> bool:
         """
         Download a single version binary.
 
@@ -117,6 +118,7 @@ class DownloadManager:
             addon_key: App key
             version: Version dictionary
             product: Product name for directory organization
+            app_id: Numeric app ID for download URLs
 
         Returns:
             True if successful, False otherwise
@@ -135,8 +137,8 @@ class DownloadManager:
             # Construct download URL
             download_url = version.get('download_url')
             if not download_url:
-                # Try to construct it
-                download_url = self.api.get_download_url(addon_key, version_id)
+                # Try to construct it using app_id (preferred) or addon_key (fallback)
+                download_url = self.api.get_download_url(addon_key, version_id, app_id=app_id)
 
             if not download_url:
                 logger.error(f"No download URL for {addon_key} v{version_name}")
@@ -245,10 +247,11 @@ class DownloadManager:
             return
 
         product = app.get('products', ['unknown'])[0]
+        app_id = app.get('app_id')
 
         print(f"🔄 Downloading {addon_key} v{version.get('version_name')}...")
 
-        success = self._download_single_version(addon_key, version, product)
+        success = self._download_single_version(addon_key, version, product, app_id)
 
         if success:
             print(f"✅ Download complete!")

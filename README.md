@@ -105,8 +105,11 @@ The scraper scripts use Docker profiles to avoid auto-starting:
 # Step 1: Scrape apps
 docker-compose run --rm scraper
 
-# Step 2: Scrape versions
+# Step 2: Scrape versions (all products)
 docker-compose run --rm version-scraper
+
+# Step 2 (alternative): Scrape versions for specific product
+docker-compose run --rm version-scraper python run_version_scraper.py crowd
 
 # Step 3: Download binaries (all products)
 docker-compose run --rm downloader
@@ -168,9 +171,14 @@ docker-compose down
 # Rebuild after code changes
 docker-compose build
 
+# Force rebuild (no cache) - use after updates to ensure all changes are applied
+docker-compose build --no-cache
+
 # Remove all data (destructive)
 docker-compose down -v
 ```
+
+**Important:** After pulling updates or modifying code, rebuild with `--no-cache` to ensure all changes are applied.
 
 ### Docker Architecture
 
@@ -203,7 +211,12 @@ python run_scraper.py
 Fetch version history for all apps (configurable age limit, Server/DC only):
 
 ```bash
+# Scrape all products
 python run_version_scraper.py
+
+# Scrape specific product only
+python run_version_scraper.py crowd
+python run_version_scraper.py jira
 ```
 
 **Output:**
@@ -382,7 +395,16 @@ Logs are written to `logs/` directory:
 - Verify Marketplace API is accessible
 - Check logs in `logs/scraper.log`
 
-### Download failures
+### Download failures (404 errors)
+- **If you see 404 errors for download URLs**, the `app_id` field may not be populated
+- **Solution:** Re-run the app scraper to populate `app_id` for all apps:
+  ```bash
+  docker-compose run --rm scraper  # or python run_scraper.py
+  ```
+- **Then rebuild Docker images** to ensure code changes are applied:
+  ```bash
+  docker-compose build --no-cache
+  ```
 - Check available disk space
 - Review `logs/failed_downloads.log`
 - Retry with `python run_downloader.py`
