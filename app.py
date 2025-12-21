@@ -4,6 +4,7 @@ import os
 import sys
 import subprocess
 from flask import Flask
+from flask_wtf.csrf import CSRFProtect
 from config import settings
 from web.routes import register_routes
 from utils.logger import setup_logging, get_logger
@@ -26,6 +27,7 @@ def check_requirements():
         package_import_map = {
             'python-decouple': 'decouple',
             'beautifulsoup4': 'bs4',
+            'flask-wtf': 'flask_wtf',
             'lxml': 'lxml',
             'playwright': 'playwright',
             'flask': 'flask',
@@ -141,6 +143,12 @@ def create_app():
     app.config['SESSION_COOKIE_HTTPONLY'] = True  # Prevent JavaScript access
     app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'  # CSRF protection
     app.config['PERMANENT_SESSION_LIFETIME'] = 3600  # 1 hour session timeout
+
+    # CSRF Protection
+    app.config['WTF_CSRF_ENABLED'] = True
+    app.config['WTF_CSRF_TIME_LIMIT'] = None  # Tokens don't expire (rely on session timeout)
+    app.config['WTF_CSRF_SSL_STRICT'] = not settings.FLASK_DEBUG  # Strict HTTPS in production
+    csrf = CSRFProtect(app)
 
     # Security headers
     @app.after_request

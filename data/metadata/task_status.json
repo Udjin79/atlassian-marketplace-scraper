@@ -1,11 +1,1 @@
-{
-  "download_20251220_165646": {
-    "status": "failed",
-    "started_at": "2025-12-20T16:56:46.534835",
-    "script": "run_downloader.py",
-    "progress": 0,
-    "message": "Error: [Errno 2] No such file or directory: 'python'",
-    "finished_at": "2025-12-20T16:56:46.550582",
-    "error": "[Errno 2] No such file or directory: 'python'"
-  }
-}
+{}

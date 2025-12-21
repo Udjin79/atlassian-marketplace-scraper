@@ -532,7 +532,7 @@ function startScrapeApps(resume) {
     btn.disabled = true;
     statusDiv.innerHTML = '<div class="spinner-border spinner-border-sm me-2"></div>Starting...';
     
-    fetch('/api/tasks/start/scrape-apps', {
+    fetchWithCSRF('/api/tasks/start/scrape-apps', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({resume: resume})
@@ -560,7 +560,7 @@ function startScrapeVersions() {
     btn.disabled = true;
     statusDiv.innerHTML = '<div class="spinner-border spinner-border-sm me-2"></div>Starting...';
     
-    fetch('/api/tasks/start/scrape-versions', {
+    fetchWithCSRF('/api/tasks/start/scrape-versions', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'}
     })
@@ -588,7 +588,7 @@ function startDownload() {
     btn.disabled = true;
     statusDiv.innerHTML = '<div class="spinner-border spinner-border-sm me-2"></div>Starting...';
     
-    fetch('/api/tasks/start/download', {
+    fetchWithCSRF('/api/tasks/start/download', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({product: product || null})
@@ -618,7 +618,7 @@ function startDownloadDescriptions() {
     btn.disabled = true;
     statusDiv.innerHTML = '<div class="spinner-border spinner-border-sm me-2"></div>Starting...';
     
-    fetch('/api/tasks/start/download-descriptions', {
+    fetchWithCSRF('/api/tasks/start/download-descriptions', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({
@@ -657,7 +657,7 @@ function saveSettings() {
         MAX_RETRY_ATTEMPTS: document.getElementById('max_retry_attempts').value
     };
     
-    fetch('/api/settings', {
+    fetchWithCSRF('/api/settings', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(settings)
@@ -695,7 +695,7 @@ function startPipeline() {
     progressText.textContent = '0% - Starting...';
     stepsDiv.innerHTML = '';
     
-    fetch('/api/tasks/start/pipeline', {
+    fetchWithCSRF('/api/tasks/start/pipeline', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({
@@ -798,7 +798,7 @@ function saveStoragePaths() {
         BINARIES_DIR_CROWD: document.getElementById('binaries_dir_crowd').value.trim()
     };
     
-    fetch('/api/storage-paths', {
+    fetchWithCSRF('/api/storage-paths', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(paths)
@@ -824,7 +824,7 @@ function loadStoragePaths() {
     const messageDiv = document.getElementById('storage-paths-message');
     messageDiv.innerHTML = '<div class="spinner-border spinner-border-sm me-2"></div>Loading...';
     
-    fetch('/api/storage-paths')
+    fetchWithCSRF('/api/storage-paths')
     .then(r => r.json())
     .then(data => {
         if (data.success && data.paths) {
@@ -921,7 +921,7 @@ function showTaskError(taskId) {
 
 // Credentials functions
 function loadAccounts() {
-    fetch('/api/credentials')
+    fetchWithCSRF('/api/credentials')
         .then(response => response.json())
         .then(data => {
             if (data.success) {
@@ -976,7 +976,7 @@ function addAccount() {
     messageDiv.innerHTML = '<div class="spinner-border spinner-border-sm me-2"></div>Saving...';
     
     // Get current accounts
-    fetch('/api/credentials')
+    fetchWithCSRF('/api/credentials')
         .then(response => response.json())
         .then(data => {
             if (data.success) {
@@ -990,7 +990,7 @@ function addAccount() {
                 }
                 
                 // Save all accounts
-                fetch('/api/credentials', {
+                fetchWithCSRF('/api/credentials', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -1025,7 +1025,7 @@ function removeAccount(index) {
         return;
     }
     
-    fetch('/api/credentials')
+    fetchWithCSRF('/api/credentials')
         .then(response => response.json())
         .then(data => {
             if (data.success) {
@@ -1033,7 +1033,7 @@ function removeAccount(index) {
                 if (index >= 0 && index < accounts.length) {
                     accounts.splice(index, 1);
                     
-                    fetch('/api/credentials', {
+                    fetchWithCSRF('/api/credentials', {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json'
@@ -1068,7 +1068,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
 // Logs functions
 function loadLogFiles() {
-    fetch('/api/logs')
+    fetchWithCSRF('/api/logs')
     .then(r => r.json())
     .then(data => {
         if (data.success) {
@@ -1158,7 +1158,7 @@ const taskLogCache = {};
 function refreshTaskStatus() {
     const scrollY = window.scrollY;
     
-    fetch('/api/tasks')
+    fetchWithCSRF('/api/tasks')
     .then(r => r.json())
     .then(data => {
         if (data.success && data.tasks) {
@@ -1308,7 +1308,7 @@ function clearCompletedTasks() {
         return;
     }
     
-    fetch('/api/tasks/clear-completed', {
+    fetchWithCSRF('/api/tasks/clear-completed', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'}
     })
@@ -1345,7 +1345,7 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Refresh logs for running tasks every 5 seconds
     logRefreshInterval = setInterval(() => {
-        fetch('/api/tasks')
+        fetchWithCSRF('/api/tasks')
         .then(r => r.json())
         .then(data => {
             if (data.success && data.tasks) {

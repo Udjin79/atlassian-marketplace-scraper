@@ -1,5 +1,20 @@
 // Main JavaScript for Atlassian Marketplace Scraper
 
+// CSRF Token Helper
+function getCSRFToken() {
+    return document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+}
+
+// Enhanced fetch with CSRF token for POST/PUT/DELETE requests
+function fetchWithCSRF(url, options = {}) {
+    // Add CSRF token to headers for non-GET requests
+    if (!options.method || options.method.toUpperCase() !== 'GET') {
+        options.headers = options.headers || {};
+        options.headers['X-CSRFToken'] = getCSRFToken();
+    }
+    return fetch(url, options);
+}
+
 document.addEventListener('DOMContentLoaded', function() {
     // Auto-submit search form on product change
     const productSelect = document.querySelector('select[name="product"]');
