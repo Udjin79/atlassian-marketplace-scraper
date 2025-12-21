@@ -392,7 +392,8 @@ class DescriptionDownloader:
         hosting: str = "datacenter",
         locale: str = "en_US",
         download_media: bool = True,
-        marketplace_url: Optional[str] = None
+        marketplace_url: Optional[str] = None,
+        download_all_hosting: bool = False
     ) -> Tuple[Optional[Path], Optional[Path]]:
         """
         Download description for an app.
@@ -408,6 +409,87 @@ class DescriptionDownloader:
         Returns:
             Tuple of (json_path, html_path) or (None, None) on error
         """
+        # If download_all_hosting is True, download for hosting types (datacenter first, then server if datacenter not available)
+        if download_all_hosting and marketplace_url:
+            # Priority: datacenter > server (cloud is skipped)
+            hosting_types = ["datacenter", "server"]
+            results = []
+            
+            print(f"  → Checking available hosting types (datacenter, server)...")
+            import sys
+            sys.stdout.flush()
+            
+            # Try datacenter first
+            datacenter_result = None
+            for idx, htype in enumerate(hosting_types, 1):
+                print(f"\n  [{idx}/{len(hosting_types)}] Processing {htype.upper()} version...")
+                sys.stdout.flush()
+                
+                # Modify URL to include hosting type
+                url_with_hosting = marketplace_url
+                if "hosting=" in url_with_hosting:
+                    url_with_hosting = re.sub(r'hosting=[^&]+', f'hosting={htype}', url_with_hosting)
+                else:
+                    separator = "&" if "?" in url_with_hosting else "?"
+                    url_with_hosting = f"{url_with_hosting}{separator}hosting={htype}"
+                
+                logger.info(f"Downloading description for {addon_key} (hosting: {htype})")
+                print(f"    URL: {url_with_hosting}")
+                sys.stdout.flush()
+                
+                # Save to hosting-specific subdirectory
+                hosting_output_dir = Path(self.descriptions_dir) / addon_key.replace('.', '_') / 'full_page' / htype
+                hosting_output_dir.mkdir(parents=True, exist_ok=True)
+                print(f"    Output: {hosting_output_dir}")
+                sys.stdout.flush()
+                
+                try:
+                    # Create a temporary marketplace_url with hosting type for this iteration
+                    result = self.download_description(
+                        addon_key=addon_key,
+                        version_name=version_name,
+                        hosting=htype,
+                        locale=locale,
+                        download_media=download_media,
+                        marketplace_url=url_with_hosting,
+                        download_all_hosting=False  # Prevent recursion
+                    )
+                    
+                    if result[0] or result[1]:
+                        print(f"    ✓ {htype.upper()} version downloaded successfully")
+                        sys.stdout.flush()
+                        results.append(result)
+                        
+                        # If datacenter succeeded, skip server
+                        if htype == "datacenter":
+                            datacenter_result = result
+                            print(f"\n  → Data Center version found and downloaded, skipping server version")
+                            sys.stdout.flush()
+                            break
+                    else:
+                        print(f"    ⚠ {htype.upper()} version download failed")
+                        sys.stdout.flush()
+                        results.append((None, None))
+                except KeyboardInterrupt:
+                    print(f"\n    [!] Download interrupted by user")
+                    raise
+                except Exception as e:
+                    print(f"    ✗ {htype.upper()} version failed: {str(e)}")
+                    sys.stdout.flush()
+                    results.append((None, None))
+            
+            print(f"\n  → Completed hosting types check")
+            sys.stdout.flush()
+            
+            # Return the first successful result (prefer datacenter)
+            if datacenter_result and (datacenter_result[0] or datacenter_result[1]):
+                return datacenter_result
+            
+            for result in results:
+                if result[0] or result[1]:
+                    return result
+            return None, None
+        
         # If marketplace_url provided, download full page instead
         if marketplace_url:
             # Try full page saver from old version (RECOMMENDED - uses complete page_saver logic)
@@ -420,6 +502,16 @@ class DescriptionDownloader:
                 html_path = output_dir / 'index.html'
                 assets_dir = output_dir / 'assets'
                 
+                print(f"    → Downloading full page HTML...")
+                print(f"      Method: page_saver_integrated (Playwright)")
+                import sys
+                sys.stdout.flush()
+                
+                logger.info(f"Attempting to download full page for {addon_key} using page_saver_integrated")
+                logger.debug(f"URL: {marketplace_url}, Output: {html_path}, Assets: {assets_dir}")
+                
+                print(f"      Loading page with Playwright (this may take 10-30 seconds)...")
+                sys.stdout.flush()
                 result = save_webpage_full(
                     url=marketplace_url,
                     output=str(html_path),
@@ -431,21 +523,51 @@ class DescriptionDownloader:
                 )
                 
                 if result and Path(result.output_html).exists():
-                    logger.info(f"Successfully downloaded full page for {addon_key}")
-                    # Also download API description for web interface
+                    file_size = Path(result.output_html).stat().st_size
+                    size_mb = file_size / (1024 * 1024)
+                    print(f"      ✓ Full page downloaded: {size_mb:.1f} MB")
+                    sys.stdout.flush()
+                    logger.info(f"Successfully downloaded full page for {addon_key} to {result.output_html}")
+                    
+                    # Extract documentation URL from downloaded HTML
+                    documentation_url = None
+                    try:
+                        with open(result.output_html, 'r', encoding='utf-8', errors='replace') as f:
+                            html_content = f.read()
+                            documentation_url = self._extract_documentation_url_from_html(html_content)
+                            if documentation_url:
+                                logger.info(f"Extracted documentation URL from full page: {documentation_url}")
+                    except Exception as e:
+                        logger.warning(f"Failed to extract documentation URL from full page: {str(e)}")
+                    
+                    # Also download API description for web interface (with summary and documentation_url)
+                    print(f"    → Downloading API description (for web interface)...")
+                    sys.stdout.flush()
                     try:
                         api_json_path, api_html_path = self._download_api_description(
-                            addon_key, version_name, hosting, locale, download_media
+                            addon_key, version_name, hosting, locale, download_media, 
+                            marketplace_url=marketplace_url, documentation_url=documentation_url
                         )
                         if api_json_path:
+                            json_size = api_json_path.stat().st_size if api_json_path.exists() else 0
+                            json_kb = json_size / 1024
+                            print(f"      ✓ API description downloaded: {json_kb:.1f} KB")
+                            sys.stdout.flush()
                             logger.info(f"Also downloaded API description for {addon_key}")
+                    except KeyboardInterrupt:
+                        raise
                     except Exception as e:
+                        print(f"      ⚠ API description failed: {str(e)}")
+                        sys.stdout.flush()
                         logger.warning(f"Failed to download API description: {e}")
                     return None, Path(result.output_html)
+                else:
+                    logger.warning(f"Full page saver returned but file doesn't exist: {result.output_html if result else 'None'}")
             except ImportError as e:
                 logger.warning(f"page_saver_integrated not available: {e}, trying Playwright method")
             except Exception as e:
-                logger.warning(f"Full page saver failed: {str(e)}, trying Playwright method")
+                logger.error(f"Full page saver failed: {str(e)}", exc_info=True)
+                logger.warning(f"Trying Playwright method as fallback")
             
             # Fallback: Try Playwright method
             try:
@@ -551,7 +673,9 @@ class DescriptionDownloader:
         version_name: Optional[str] = None,
         hosting: str = "datacenter",
         locale: str = "en_US",
-        download_media: bool = True
+        download_media: bool = True,
+        marketplace_url: Optional[str] = None,
+        documentation_url: Optional[str] = None
     ) -> Tuple[Optional[Path], Optional[Path]]:
         """
         Download description from API (internal method).
@@ -561,15 +685,26 @@ class DescriptionDownloader:
         """
         try:
             # Get versions
+            print(f"      Fetching versions from API...")
+            import sys
+            sys.stdout.flush()
             versions = self._get_versions(addon_key, hosting)
             if not versions:
                 logger.warning(f"No versions found for {addon_key}")
+                print(f"      ⚠ No versions found")
+                sys.stdout.flush()
                 return None, None
 
             picked = self._pick_version(versions, version_name)
             if not picked:
                 logger.warning(f"Version '{version_name}' not found for {addon_key}")
+                print(f"      ⚠ Version '{version_name}' not found")
+                sys.stdout.flush()
                 return None, None
+            
+            version_name_display = picked.get("name", "unknown")
+            print(f"      Selected version: {version_name_display}")
+            sys.stdout.flush()
 
             version_id = picked.get("id")
             if not version_id:
@@ -590,28 +725,83 @@ class DescriptionDownloader:
             media_url = f"{API_BASE}/addons/{addon_key}/versions/{version_id}/media"
             addon_url = f"{API_BASE}/addons/{addon_key}"
 
+            print(f"      Fetching overview data...")
+            sys.stdout.flush()
             overview = self._fetch_with_fallback(
                 overview_url,
                 fallback_url=f"{API_BASE}/addons/{addon_key}/overview",
                 params=params
             )
+            print(f"      Fetching highlights data...")
+            sys.stdout.flush()
             highlights = self._fetch_with_fallback(
                 highlights_url,
                 fallback_url=f"{API_BASE}/addons/{addon_key}/highlights",
                 params=params
             )
+            print(f"      Fetching media data...")
+            sys.stdout.flush()
             media = self._fetch_with_fallback(
                 media_url,
                 fallback_url=f"{API_BASE}/addons/{addon_key}/media",
                 params=params
             )
+            print(f"      Fetching addon information...")
+            sys.stdout.flush()
             addon_info = self._fetch(addon_url, params={"locale": locale, "hosting": hosting, "expand": "details"})
+
+            # Extract summary from addon_info for easy access
+            summary = addon_info.get("summary") or addon_info.get("tagLine") or ""
+
+            # Extract vendor documentation link
+            # Use provided documentation_url if available (from full page download), otherwise try API
+            if not documentation_url:
+                vendor_links = addon_info.get("vendorLinks", {}) or {}
+                # Look for documentation link in vendorLinks
+                for key, value in vendor_links.items():
+                    if isinstance(value, str) and value:
+                        key_lower = key.lower()
+                        if 'doc' in key_lower or 'documentation' in key_lower or 'guide' in key_lower:
+                            documentation_url = value
+                            break
+                
+                # Also check in _embedded or other fields
+                if not documentation_url:
+                    embedded = addon_info.get("_embedded", {})
+                    if isinstance(embedded, dict):
+                        # Check for documentation in various places
+                        for key, value in embedded.items():
+                            if isinstance(value, dict) and 'href' in value:
+                                key_lower = key.lower()
+                                if 'doc' in key_lower or 'documentation' in key_lower:
+                                    documentation_url = value.get('href')
+                                    break
+            
+            # If not found in API and not provided, try to extract from HTML page if marketplace_url is available
+            if not documentation_url and marketplace_url:
+                try:
+                    print(f"      Extracting documentation URL from HTML page...")
+                    import sys
+                    sys.stdout.flush()
+                    page_resp = self.session.get(marketplace_url, timeout=30, allow_redirects=True)
+                    page_resp.raise_for_status()
+                    if page_resp.encoding is None or page_resp.encoding.lower() not in ['utf-8', 'utf8']:
+                        page_resp.encoding = 'utf-8'
+                    page_html = page_resp.text
+                    documentation_url = self._extract_documentation_url_from_html(page_html)
+                    if documentation_url:
+                        print(f"      ✓ Found documentation URL: {documentation_url}")
+                        sys.stdout.flush()
+                except Exception as e:
+                    logger.warning(f"Failed to extract documentation URL from HTML: {str(e)}")
 
             payload = {
                 "addon_key": addon_key,
                 "hosting": hosting,
                 "locale": locale,
                 "fetched_at": datetime.now(timezone.utc).isoformat(),
+                "summary": summary,  # Add summary at root level for easy access
+                "documentation_url": documentation_url,  # Add documentation URL
                 "version": {
                     "id": version_id,
                     "name": picked.get("name"),
@@ -629,17 +819,21 @@ class DescriptionDownloader:
             output_dir.mkdir(parents=True, exist_ok=True)
 
             # Save JSON
+            print(f"      Saving JSON file...")
             json_path = output_dir / f"{addon_key.replace('.', '_')}_{payload['version']['name']}.json"
             with json_path.open("w", encoding="utf-8") as f:
                 json.dump(payload, f, ensure_ascii=False, indent=2)
 
             # Save HTML
+            print(f"      Saving HTML file...")
             html_path = output_dir / f"{addon_key.replace('.', '_')}_{payload['version']['name']}.html"
             html_path.write_text(self._render_html(payload), encoding="utf-8")
 
             # Download media if requested
             if download_media:
+                print(f"      Downloading media files...")
                 self._download_media(media, output_dir / "media")
+                print(f"      ✓ Media files downloaded")
 
             logger.info(f"Description saved for {addon_key}: {json_path}, {html_path}")
             return json_path, html_path
@@ -2068,6 +2262,100 @@ class DescriptionDownloader:
             return m.group(1)
 
         return None
+    
+    def _extract_documentation_url_from_html(self, page_html: str) -> Optional[str]:
+        """
+        Extract vendor documentation URL from HTML page Resources section.
+        Looks for "App documentation" link in Resources block.
+
+        Args:
+            page_html: HTML content of marketplace page
+
+        Returns:
+            Documentation URL or None if not found
+        """
+        if not page_html:
+            return None
+        
+        try:
+            soup = BeautifulSoup(page_html, 'html.parser')
+            
+            # Method 1: Look for Resources section with "App documentation"
+            # Find section with "Resources" heading
+            resources_section = None
+            for heading in soup.find_all(['h2', 'h3', 'h4', 'h5', 'h6']):
+                if heading.get_text().strip().lower() == 'resources':
+                    # Find parent section
+                    resources_section = heading.find_parent(['section', 'div', 'article'])
+                    break
+            
+            if resources_section:
+                # Look for "App documentation" text and find associated link
+                for elem in resources_section.find_all(['a', 'div', 'span', 'p']):
+                    text = elem.get_text().strip().lower()
+                    # Check if it contains "app documentation" or "documentation"
+                    if 'app documentation' in text or ('documentation' in text and 'comprehensive' in text):
+                        # Find link in this element or nearby
+                        link = elem.find('a', href=True)
+                        if link:
+                            href = link.get('href', '')
+                            if href:
+                                # Make absolute URL if relative
+                                if href.startswith('/'):
+                                    return f"{MARKETPLACE_BASE}{href}"
+                                elif href.startswith('http'):
+                                    return href
+                                else:
+                                    return f"{MARKETPLACE_BASE}/{href.lstrip('/')}"
+                        
+                        # Check if the element itself is a link
+                        if elem.name == 'a' and elem.get('href'):
+                            href = elem.get('href')
+                            if href:
+                                if href.startswith('/'):
+                                    return f"{MARKETPLACE_BASE}{href}"
+                                elif href.startswith('http'):
+                                    return href
+                                else:
+                                    return f"{MARKETPLACE_BASE}/{href.lstrip('/')}"
+            
+            # Method 2: Search for links with "documentation" in text or near "comprehensive"
+            for link in soup.find_all('a', href=True):
+                text = link.get_text().strip().lower()
+                parent_text = ''
+                if link.parent:
+                    parent_text = link.parent.get_text().strip().lower()
+                
+                # Look for "how this app works" or "comprehensive" near documentation
+                if ('documentation' in text or 'documentation' in parent_text) and \
+                   ('comprehensive' in text or 'comprehensive' in parent_text or 'how this app works' in text or 'how this app works' in parent_text):
+                    href = link.get('href', '')
+                    if href:
+                        if href.startswith('/'):
+                            return f"{MARKETPLACE_BASE}{href}"
+                        elif href.startswith('http'):
+                            return href
+                        else:
+                            return f"{MARKETPLACE_BASE}/{href.lstrip('/')}"
+            
+            # Method 3: Regex search for common patterns
+            # Look for links in Resources section using regex
+            resources_pattern = r'(?i)resources.*?app\s+documentation.*?href=["\']([^"\']+)["\']'
+            match = re.search(resources_pattern, page_html, re.DOTALL)
+            if match:
+                href = match.group(1)
+                if href:
+                    if href.startswith('/'):
+                        return f"{MARKETPLACE_BASE}{href}"
+                    elif href.startswith('http'):
+                        return href
+                    else:
+                        return f"{MARKETPLACE_BASE}/{href.lstrip('/')}"
+            
+        except Exception as e:
+            logger.warning(f"Error extracting documentation URL from HTML: {str(e)}")
+        
+        return None
 
     def _deep_get(self, obj: Dict, path: List[str]) -> Optional[str]:
         """
@@ -2085,6 +2373,8 @@ class DescriptionDownloader:
             if not isinstance(cur, dict):
                 return None
             cur = cur.get(key)
+            if cur is None:
+                return None
         return cur
 
     def _download_binary_static(self, session: requests.Session, url: str, assets_dir: Path, timeout: int) -> str:

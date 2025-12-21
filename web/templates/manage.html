@@ -268,41 +268,58 @@
 <div class="row mt-4">
     <div class="col-12">
         <div class="card">
-            <div class="card-header bg-warning text-dark">
+            <div class="card-header bg-warning text-dark d-flex justify-content-between align-items-center">
                 <h5 class="mb-0"><i class="bi bi-key"></i> Marketplace API Credentials</h5>
+                <span id="credentials-count-badge" class="badge bg-dark">Loading...</span>
             </div>
             <div class="card-body">
                 <div class="alert alert-info">
                     <i class="bi bi-info-circle"></i> 
                     <strong>Note:</strong> Credentials are stored in <code>.credentials.json</code> (not in .env file) 
-                    so they won't be committed to git. This allows you to push the code to master without exposing credentials.
+                    so they won't be committed to git. You can add multiple accounts for parallel requests and automatic rotation.
+                    <br><strong>Multiple accounts:</strong> When you have 2+ accounts, the system will automatically rotate between them to avoid rate limits.
                 </div>
-                <form id="credentials-form">
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <label for="credentials_username" class="form-label">Username (Email)</label>
-                                <input type="email" class="form-control" id="credentials_username" 
-                                       value="{{ credentials.username }}" 
-                                       placeholder="your-email@example.com">
-                                <small class="text-muted">Your Atlassian account email</small>
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <label for="credentials_api_token" class="form-label">API Token</label>
-                                <input type="password" class="form-control" id="credentials_api_token" 
-                                       value="{{ credentials.api_token }}" 
-                                       placeholder="Enter API token">
-                                <small class="text-muted">API token from Atlassian (stored securely)</small>
-                            </div>
-                        </div>
+                
+                <!-- Accounts List -->
+                <div id="accounts-list" class="mb-3">
+                    <h6>Configured Accounts:</h6>
+                    <div id="accounts-container">
+                        <!-- Accounts will be loaded here -->
                     </div>
-                    <button type="button" class="btn btn-warning" onclick="saveCredentials()">
-                        <i class="bi bi-save"></i> Save Credentials
-                    </button>
-                    <div id="credentials-message" class="mt-2"></div>
-                </form>
+                </div>
+                
+                <!-- Add New Account Form -->
+                <div class="card border-primary mb-3">
+                    <div class="card-header bg-primary text-white">
+                        <h6 class="mb-0"><i class="bi bi-plus-circle"></i> Add/Update Account</h6>
+                    </div>
+                    <div class="card-body">
+                        <form id="credentials-form">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="credentials_username" class="form-label">Username (Email)</label>
+                                        <input type="email" class="form-control" id="credentials_username" 
+                                               placeholder="your-email@example.com">
+                                        <small class="text-muted">Your Atlassian account email</small>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="credentials_api_token" class="form-label">API Token</label>
+                                        <input type="password" class="form-control" id="credentials_api_token" 
+                                               placeholder="Enter API token">
+                                        <small class="text-muted">API token from Atlassian (stored securely)</small>
+                                    </div>
+                                </div>
+                            </div>
+                            <button type="button" class="btn btn-primary" onclick="addAccount()">
+                                <i class="bi bi-plus-circle"></i> Add Account
+                            </button>
+                            <div id="credentials-message" class="mt-2"></div>
+                        </form>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -903,30 +920,151 @@ function showTaskError(taskId) {
 }
 
 // Credentials functions
-function saveCredentials() {
+function loadAccounts() {
+    fetch('/api/credentials')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                const container = document.getElementById('accounts-container');
+                const badge = document.getElementById('credentials-count-badge');
+                
+                badge.textContent = `${data.count} account(s)`;
+                if (data.rotation_enabled) {
+                    badge.className = 'badge bg-success';
+                    badge.title = 'Rotation enabled - accounts will be rotated automatically';
+                } else {
+                    badge.className = 'badge bg-secondary';
+                    badge.title = 'Single account - add more for rotation';
+                }
+                
+                if (data.accounts && data.accounts.length > 0) {
+                    container.innerHTML = data.accounts.map((acc, index) => `
+                        <div class="card mb-2">
+                            <div class="card-body p-2">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <strong>${acc.username || '(No username)'}</strong>
+                                        <br><small class="text-muted">Token: ${acc.api_token || 'Not set'}</small>
+                                    </div>
+                                    <button class="btn btn-sm btn-danger" onclick="removeAccount(${index})">
+                                        <i class="bi bi-trash"></i> Remove
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    `).join('');
+                } else {
+                    container.innerHTML = '<div class="alert alert-warning">No accounts configured. Add an account below.</div>';
+                }
+            }
+        })
+        .catch(error => {
+            console.error('Error loading accounts:', error);
+        });
+}
+
+function addAccount() {
     const username = document.getElementById('credentials_username').value.trim();
     const apiToken = document.getElementById('credentials_api_token').value.trim();
     const messageDiv = document.getElementById('credentials-message');
     
+    if (!username || !apiToken) {
+        messageDiv.innerHTML = '<div class="alert alert-danger"><i class="bi bi-exclamation-triangle"></i> Please fill in both username and API token</div>';
+        return;
+    }
+    
     messageDiv.innerHTML = '<div class="spinner-border spinner-border-sm me-2"></div>Saving...';
     
-    fetch('/api/credentials', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({username: username, api_token: apiToken})
-    })
-    .then(r => r.json())
-    .then(data => {
-        if (data.success) {
-            messageDiv.innerHTML = '<div class="alert alert-success"><i class="bi bi-check-circle"></i> Credentials saved successfully</div>';
-        } else {
-            messageDiv.innerHTML = `<div class="alert alert-danger"><i class="bi bi-exclamation-triangle"></i> ${data.error || 'Failed to save credentials'}</div>`;
-        }
-    })
-    .catch(e => {
-        messageDiv.innerHTML = `<div class="alert alert-danger">Error: ${e.message}</div>`;
-    });
+    // Get current accounts
+    fetch('/api/credentials')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                const accounts = data.accounts || [];
+                // Check if account already exists
+                const existingIndex = accounts.findIndex(acc => acc.username === username);
+                if (existingIndex >= 0) {
+                    accounts[existingIndex].api_token = apiToken;
+                } else {
+                    accounts.push({ username: username, api_token: apiToken });
+                }
+                
+                // Save all accounts
+                fetch('/api/credentials', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        accounts: accounts
+                    })
+                })
+                .then(response => response.json())
+                .then(result => {
+                    if (result.success) {
+                        messageDiv.innerHTML = `<div class="alert alert-success"><i class="bi bi-check-circle"></i> ${result.message}</div>`;
+                        document.getElementById('credentials_username').value = '';
+                        document.getElementById('credentials_api_token').value = '';
+                        loadAccounts();
+                    } else {
+                        messageDiv.innerHTML = `<div class="alert alert-danger"><i class="bi bi-exclamation-triangle"></i> ${result.error || 'Failed to save credentials'}</div>`;
+                    }
+                })
+                .catch(error => {
+                    messageDiv.innerHTML = `<div class="alert alert-danger"><i class="bi bi-exclamation-triangle"></i> Error: ${error.message}</div>`;
+                });
+            }
+        })
+        .catch(error => {
+            messageDiv.innerHTML = `<div class="alert alert-danger"><i class="bi bi-exclamation-triangle"></i> Error: ${error.message}</div>`;
+        });
 }
+
+function removeAccount(index) {
+    if (!confirm('Are you sure you want to remove this account?')) {
+        return;
+    }
+    
+    fetch('/api/credentials')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                const accounts = data.accounts || [];
+                if (index >= 0 && index < accounts.length) {
+                    accounts.splice(index, 1);
+                    
+                    fetch('/api/credentials', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            accounts: accounts
+                        })
+                    })
+                    .then(response => response.json())
+                    .then(result => {
+                        if (result.success) {
+                            loadAccounts();
+                        } else {
+                            alert('Failed to remove account: ' + (result.error || 'Unknown error'));
+                        }
+                    })
+                    .catch(error => {
+                        alert('Error removing account: ' + error.message);
+                    });
+                }
+            }
+        })
+        .catch(error => {
+            alert('Error loading accounts: ' + error.message);
+        });
+}
+
+// Load accounts on page load
+document.addEventListener('DOMContentLoaded', function() {
+    loadAccounts();
+});
 
 // Logs functions
 function loadLogFiles() {

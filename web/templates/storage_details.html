@@ -1,0 +1,223 @@
+{% extends "base.html" %}
+
+{% block title %}Storage Details - Atlassian Marketplace Scraper{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h2><i class="bi bi-hdd-stack"></i> Storage Details</h2>
+        <p class="text-muted">Detailed breakdown of storage usage by category, disk, and folders</p>
+    </div>
+</div>
+
+{% if stats %}
+<!-- Total Summary -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card border-primary">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0"><i class="bi bi-info-circle"></i> Total Storage</h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-3">
+                        <h3>
+                            {% if stats.total.gb >= 1.0 %}
+                                {{ "%.2f"|format(stats.total.gb) }} GB
+                            {% else %}
+                                {{ "%.0f"|format(stats.total.mb) }} MB
+                            {% endif %}
+                        </h3>
+                        <small class="text-muted">Total Size</small>
+                    </div>
+                    <div class="col-md-3">
+                        <h3>{{ stats.total.file_count }}</h3>
+                        <small class="text-muted">Total Files</small>
+                    </div>
+                    <div class="col-md-6">
+                        <h6>By Disk:</h6>
+                        <div class="d-flex flex-wrap gap-2">
+                            {% for drive, disk_data in stats.by_disk.items() %}
+                            <span class="badge bg-secondary">
+                                <strong>{{ drive }}</strong>: 
+                                {% if disk_data.gb >= 1.0 %}
+                                    {{ "%.2f"|format(disk_data.gb) }} GB
+                                {% else %}
+                                    {{ "%.0f"|format(disk_data.mb) }} MB
+                                {% endif %}
+                                ({{ disk_data.file_count }} files)
+                            </span>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Categories Breakdown -->
+<div class="row mb-4">
+    {% for category, cat_data in stats.categories.items() %}
+    <div class="col-md-4 mb-3">
+        <div class="card h-100">
+            <div class="card-header bg-dark text-white">
+                <h5 class="mb-0 text-capitalize">
+                    <i class="bi bi-folder"></i> {{ category }}
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <h3>
+                        {% if cat_data.gb >= 1.0 %}
+                            {{ "%.2f"|format(cat_data.gb) }} GB
+                        {% else %}
+                            {{ "%.0f"|format(cat_data.mb) }} MB
+                        {% endif %}
+                    </h3>
+                    <small class="text-muted">{{ cat_data.file_count }} files</small>
+                </div>
+                
+                {% if cat_data.by_disk %}
+                <div class="mb-3">
+                    <h6>By Disk:</h6>
+                    <ul class="list-unstyled">
+                        {% for drive, disk_data in cat_data.by_disk.items() %}
+                        <li class="mb-1">
+                            <strong>{{ drive }}</strong>: 
+                            {% if disk_data.gb >= 1.0 %}
+                                {{ "%.2f"|format(disk_data.gb) }} GB
+                            {% else %}
+                                {{ "%.0f"|format(disk_data.mb) }} MB
+                            {% endif %}
+                            <small class="text-muted">({{ disk_data.file_count }} files)</small>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                {% endif %}
+                
+                {% if cat_data.folders %}
+                <div>
+                    <h6>Top Folders:</h6>
+                    <div class="table-responsive" style="max-height: 300px; overflow-y: auto;">
+                        <table class="table table-sm table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Folder</th>
+                                    <th class="text-end">Size</th>
+                                    <th class="text-end">Files</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for folder in cat_data.folders[:20] %}
+                                <tr>
+                                    <td>
+                                        <code class="small">{{ folder.name }}</code>
+                                        <br><small class="text-muted">{{ folder.path }}</small>
+                                    </td>
+                                    <td class="text-end">
+                                        {% if folder.gb >= 1.0 %}
+                                            {{ "%.2f"|format(folder.gb) }} GB
+                                        {% else %}
+                                            {{ "%.0f"|format(folder.mb) }} MB
+                                        {% endif %}
+                                    </td>
+                                    <td class="text-end">{{ folder.file_count }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% if cat_data.folders|length > 20 %}
+                    <small class="text-muted">Showing top 20 folders ({{ cat_data.folders|length }} total)</small>
+                    {% endif %}
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<!-- Detailed Folders Table -->
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header bg-dark text-white">
+                <h5 class="mb-0"><i class="bi bi-list-ul"></i> All Folders by Category</h5>
+            </div>
+            <div class="card-body">
+                <ul class="nav nav-tabs" id="categoryTabs" role="tablist">
+                    {% for category in stats.categories.keys() %}
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link {% if loop.first %}active{% endif %}" 
+                                id="{{ category }}-tab" 
+                                data-bs-toggle="tab" 
+                                data-bs-target="#{{ category }}" 
+                                type="button" 
+                                role="tab">
+                            {{ category|title }}
+                        </button>
+                    </li>
+                    {% endfor %}
+                </ul>
+                <div class="tab-content mt-3" id="categoryTabContent">
+                    {% for category, cat_data in stats.categories.items() %}
+                    <div class="tab-pane fade {% if loop.first %}show active{% endif %}" 
+                         id="{{ category }}" 
+                         role="tabpanel">
+                        <div class="table-responsive">
+                            <table class="table table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>Folder Path</th>
+                                        <th>Drive</th>
+                                        <th class="text-end">Size</th>
+                                        <th class="text-end">Files</th>
+                                        <th class="text-end">% of Category</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for folder in cat_data.folders %}
+                                    <tr>
+                                        <td>
+                                            <code>{{ folder.path }}</code>
+                                        </td>
+                                        <td><span class="badge bg-secondary">{{ folder.drive }}</span></td>
+                                        <td class="text-end">
+                                            {% if folder.gb >= 1.0 %}
+                                                {{ "%.2f"|format(folder.gb) }} GB
+                                            {% else %}
+                                                {{ "%.0f"|format(folder.mb) }} MB
+                                            {% endif %}
+                                        </td>
+                                        <td class="text-end">{{ folder.file_count }}</td>
+                                        <td class="text-end">
+                                            {% if cat_data.bytes > 0 %}
+                                                {{ "%.1f"|format((folder.bytes / cat_data.bytes * 100)) }}%
+                                            {% else %}
+                                                0%
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% else %}
+<div class="alert alert-info">
+    <h5 class="alert-heading">No Storage Data</h5>
+    <p>Storage statistics are not available yet.</p>
+</div>
+{% endif %}
+
+{% endblock %}
+

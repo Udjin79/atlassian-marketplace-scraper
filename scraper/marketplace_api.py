@@ -6,6 +6,7 @@ from typing import List, Dict, Optional
 from config import settings
 from utils.rate_limiter import RateLimiter
 from utils.logger import get_logger
+from utils.credentials import get_credentials_rotator, CredentialsRotator
 
 logger = get_logger('scraper')
 
@@ -13,16 +14,33 @@ logger = get_logger('scraper')
 class MarketplaceAPI:
     """Client for interacting with Atlassian Marketplace REST API."""
 
-    def __init__(self, username=None, api_token=None):
+    def __init__(self, username=None, api_token=None, use_rotation=False, rotator: Optional[CredentialsRotator] = None):
         """
         Initialize the Marketplace API client.
 
         Args:
-            username: Atlassian account username (email)
-            api_token: API token from Atlassian
+            username: Atlassian account username (email) - if provided, uses this account
+            api_token: API token from Atlassian - if provided, uses this token
+            use_rotation: If True, uses credential rotation for parallel requests
+            rotator: Optional CredentialsRotator instance (if None and use_rotation=True, uses global rotator)
         """
-        self.username = username or settings.MARKETPLACE_USERNAME
-        self.api_token = api_token or settings.MARKETPLACE_API_TOKEN
+        self.use_rotation = use_rotation
+        self.rotator = rotator or (get_credentials_rotator() if use_rotation else None)
+        
+        if username and api_token:
+            # Use provided credentials
+            self.username = username
+            self.api_token = api_token
+        elif use_rotation and self.rotator:
+            # Use rotation - get next credentials
+            creds = self.rotator.get_next()
+            self.username = creds.get('username') if creds else settings.MARKETPLACE_USERNAME
+            self.api_token = creds.get('api_token') if creds else settings.MARKETPLACE_API_TOKEN
+        else:
+            # Use settings/default
+            self.username = username or settings.MARKETPLACE_USERNAME
+            self.api_token = api_token or settings.MARKETPLACE_API_TOKEN
+        
         self.session = requests.Session()
 
         # Set up authentication if credentials provided
@@ -32,8 +50,18 @@ class MarketplaceAPI:
         self.rate_limiter = RateLimiter(delay=settings.SCRAPER_REQUEST_DELAY)
         self.base_url_v2 = settings.MARKETPLACE_API_V2
         self.download_base_url = settings.MARKETPLACE_BASE_URL
+    
+    def rotate_credentials(self):
+        """Rotate to next credentials if using rotation."""
+        if self.use_rotation and self.rotator:
+            creds = self.rotator.get_next()
+            if creds:
+                self.username = creds.get('username', '')
+                self.api_token = creds.get('api_token', '')
+                self.session.auth = (self.username, self.api_token)
+                logger.debug(f"Rotated to credentials for: {self.username}")
 
-    def _make_request(self, url, params=None, retry_count=0):
+    def _make_request(self, url, params=None, retry_count=0, rotate_on_429=True):
         """
         Make HTTP request with retry logic and rate limiting.
 
@@ -41,6 +69,7 @@ class MarketplaceAPI:
             url: Request URL
             params: Query parameters
             retry_count: Current retry attempt
+            rotate_on_429: If True, rotate credentials on 429 (rate limit) errors
 
         Returns:
             Response JSON data
@@ -65,13 +94,22 @@ class MarketplaceAPI:
         except requests.exceptions.HTTPError as e:
             status_code = e.response.status_code if e.response else 0
 
+            # Rotate credentials on 429 if using rotation
+            if status_code == 429 and rotate_on_429 and self.use_rotation and self.rotator:
+                logger.warning(f"Rate limited (429), rotating credentials...")
+                self.rotate_credentials()
+                if retry_count < settings.MAX_RETRY_ATTEMPTS:
+                    wait_time = 2 ** retry_count
+                    time.sleep(wait_time)
+                    return self._make_request(url, params, retry_count + 1, rotate_on_429=False)
+
             if status_code == 429 or status_code >= 500:
                 # Retry on rate limit or server errors
                 if retry_count < settings.MAX_RETRY_ATTEMPTS:
                     wait_time = 2 ** retry_count  # Exponential backoff
                     logger.warning(f"HTTP {status_code} error, retrying in {wait_time}s... (attempt {retry_count + 1}/{settings.MAX_RETRY_ATTEMPTS})")
                     time.sleep(wait_time)
-                    return self._make_request(url, params, retry_count + 1)
+                    return self._make_request(url, params, retry_count + 1, rotate_on_429)
 
             logger.error(f"HTTP error for {url}: {str(e)}")
             raise
@@ -81,7 +119,7 @@ class MarketplaceAPI:
                 wait_time = 2 ** retry_count
                 logger.warning(f"Request error, retrying in {wait_time}s... (attempt {retry_count + 1}/{settings.MAX_RETRY_ATTEMPTS})")
                 time.sleep(wait_time)
-                return self._make_request(url, params, retry_count + 1)
+                return self._make_request(url, params, retry_count + 1, rotate_on_429)
 
             logger.error(f"Request failed for {url}: {str(e)}")
             raise

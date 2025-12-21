@@ -29,6 +29,13 @@ def register_routes(app):
             total_versions = store.get_total_versions_count()
             downloaded_versions = store.get_downloaded_versions_count()
             storage_stats = download_mgr.get_storage_stats()
+            
+            # Get detailed storage stats only if requested (lazy loading)
+            # This avoids slow page loads - detailed stats will be loaded via AJAX
+            include_detailed = request.args.get('detailed', 'false').lower() == 'true'
+            detailed_stats = None
+            if include_detailed:
+                detailed_stats = download_mgr.get_detailed_storage_stats()
 
             stats = {
                 'total_apps': total_apps,
@@ -37,7 +44,8 @@ def register_routes(app):
                 'pending_downloads': total_versions - downloaded_versions,
                 'storage_used_gb': storage_stats.get('total_gb', 0),
                 'storage_used_mb': storage_stats.get('total_mb', 0),
-                'file_count': storage_stats.get('file_count', 0)
+                'file_count': storage_stats.get('file_count', 0),
+                'detailed_storage': detailed_stats
             }
 
             return render_template('index.html', stats=stats, products=PRODUCTS)
@@ -390,13 +398,28 @@ def register_routes(app):
                                     else:
                                         latest_description = sorted(html_files)[-1]
                                 
+                                # Extract documentation URL from JSON files
+                                documentation_url = None
+                                if json_files:
+                                    # Try to find documentation URL in the latest JSON file
+                                    try:
+                                        import json
+                                        latest_json = sorted(json_files)[-1]
+                                        json_path = os.path.join(item_path, latest_json)
+                                        with open(json_path, 'r', encoding='utf-8') as f:
+                                            json_data = json.load(f)
+                                            documentation_url = json_data.get('documentation_url') or json_data.get('addon', {}).get('vendorLinks', {}).get('Documentation')
+                                    except Exception:
+                                        pass
+                                
                                 apps_with_descriptions.append({
                                     'app': app,
                                     'addon_key': addon_key,
                                     'description_count': len(html_files),
                                     'json_count': len(json_files),
                                     'latest_description': latest_description,
-                                    'has_full_page': 'full_page/index.html' in html_files if html_files else False
+                                    'has_full_page': 'full_page/index.html' in html_files if html_files else False,
+                                    'documentation_url': documentation_url
                                 })
 
             return render_template(
@@ -489,6 +512,26 @@ def register_routes(app):
         except Exception as e:
             logger.error(f"API error: {str(e)}")
             return jsonify({'success': False, 'error': str(e)}), 500
+
+    @app.route('/api/storage-stats')
+    def api_storage_stats():
+        """Get detailed storage statistics with breakdown by category, disk, and folders."""
+        try:
+            detailed_stats = download_mgr.get_detailed_storage_stats()
+            return jsonify(detailed_stats)
+        except Exception as e:
+            logger.error(f"Error getting storage stats: {str(e)}")
+            return jsonify({'error': str(e)}), 500
+    
+    @app.route('/storage')
+    def storage_details():
+        """Storage details page with breakdown by categories and folders."""
+        try:
+            detailed_stats = download_mgr.get_detailed_storage_stats()
+            return render_template('storage_details.html', stats=detailed_stats)
+        except Exception as e:
+            logger.error(f"Error loading storage details: {str(e)}")
+            return render_template('error.html', error=str(e)), 500
 
     @app.route('/api/stats')
     def api_stats():
@@ -975,16 +1018,30 @@ def register_routes(app):
 
     @app.route('/api/credentials', methods=['GET'])
     def api_get_credentials():
-        """Get credentials (masked)."""
+        """Get credentials (masked). Supports multiple accounts."""
         try:
-            from utils.credentials import get_credentials
-            credentials = get_credentials()
+            from utils.credentials import get_credentials, get_all_credentials, get_credentials_rotator
+            # Get all accounts
+            all_accounts = get_all_credentials()
+            # Get single credentials for backward compatibility
+            single_creds = get_credentials()
+            rotator = get_credentials_rotator()
+            
             return jsonify({
                 'success': True,
-                'credentials': {
-                    'username': credentials.get('username', ''),
-                    'api_token': '***' if credentials.get('api_token') else ''
-                }
+                'accounts': [
+                    {
+                        'username': acc.get('username', ''),
+                        'api_token': '***' if acc.get('api_token') else ''
+                    }
+                    for acc in all_accounts
+                ],
+                'single': {
+                    'username': single_creds.get('username', ''),
+                    'api_token': '***' if single_creds.get('api_token') else ''
+                },
+                'count': len(all_accounts),
+                'rotation_enabled': rotator.count() > 1
             })
         except Exception as e:
             logger.error(f"Error getting credentials: {str(e)}")
@@ -992,23 +1049,51 @@ def register_routes(app):
 
     @app.route('/api/credentials', methods=['POST'])
     def api_update_credentials():
-        """Update credentials."""
+        """Update credentials. Supports both single and multiple accounts."""
         try:
             data = request.get_json()
             if not data:
                 return jsonify({'success': False, 'error': 'No data provided'}), 400
             
-            username = data.get('username', '').strip()
-            api_token = data.get('api_token', '').strip()
-            
-            from utils.credentials import save_credentials
-            if save_credentials(username, api_token):
-                return jsonify({
-                    'success': True,
-                    'message': 'Credentials saved successfully'
-                })
+            # Check if it's multiple accounts update
+            if 'accounts' in data and isinstance(data['accounts'], list):
+                from utils.credentials import save_multiple_credentials
+                accounts = []
+                for acc in data['accounts']:
+                    username = acc.get('username', '').strip()
+                    api_token = acc.get('api_token', '').strip()
+                    if username and api_token:
+                        accounts.append({
+                            'username': username,
+                            'api_token': api_token
+                        })
+                
+                if save_multiple_credentials(accounts):
+                    # Reload rotator
+                    from utils.credentials import get_credentials_rotator
+                    get_credentials_rotator().reload()
+                    return jsonify({
+                        'success': True,
+                        'message': f'Saved {len(accounts)} account(s) successfully'
+                    })
+                else:
+                    return jsonify({'success': False, 'error': 'Failed to save credentials'}), 500
             else:
-                return jsonify({'success': False, 'error': 'Failed to save credentials'}), 500
+                # Single account update (backward compatibility)
+                username = data.get('username', '').strip()
+                api_token = data.get('api_token', '').strip()
+                
+                from utils.credentials import save_credentials
+                if save_credentials(username, api_token):
+                    # Reload rotator
+                    from utils.credentials import get_credentials_rotator
+                    get_credentials_rotator().reload()
+                    return jsonify({
+                        'success': True,
+                        'message': 'Credentials saved successfully'
+                    })
+                else:
+                    return jsonify({'success': False, 'error': 'Failed to save credentials'}), 500
         except Exception as e:
             logger.error(f"Error updating credentials: {str(e)}")
             return jsonify({'success': False, 'error': str(e)}), 500

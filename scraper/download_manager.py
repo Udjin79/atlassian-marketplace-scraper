@@ -2,6 +2,7 @@
 
 import os
 import requests
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Optional, Dict
 from tqdm import tqdm
@@ -28,6 +29,15 @@ class DownloadManager:
         """
         self.api = api or MarketplaceAPI()
         self.store = store or MetadataStore()
+        
+        # Cache for storage statistics (TTL: 5 minutes)
+        self._storage_stats_cache = None
+        self._storage_stats_cache_time = 0
+        self._storage_stats_cache_ttl = 300  # 5 minutes
+        
+        self._detailed_storage_stats_cache = None
+        self._detailed_storage_stats_cache_time = 0
+        self._detailed_storage_stats_cache_ttl = 300  # 5 minutes
         self.max_workers = settings.MAX_CONCURRENT_DOWNLOADS
         self.max_retries = settings.MAX_RETRY_ATTEMPTS
 
@@ -255,13 +265,24 @@ class DownloadManager:
         else:
             print(f"❌ Download failed")
 
-    def get_storage_stats(self) -> Dict:
+    def get_storage_stats(self, use_cache: bool = True) -> Dict:
         """
         Get storage statistics from all product-specific directories.
+
+        Args:
+            use_cache: If True, use cached results if available and not expired
 
         Returns:
             Dictionary with storage stats
         """
+        # Check cache
+        if use_cache:
+            current_time = time.time()
+            if (self._storage_stats_cache is not None and 
+                current_time - self._storage_stats_cache_time < self._storage_stats_cache_ttl):
+                logger.debug("Returning cached storage stats")
+                return self._storage_stats_cache
+        
         total_size = 0
         file_count = 0
         
@@ -299,9 +320,221 @@ class DownloadManager:
         size_gb = total_size / (1024 ** 3)
         size_mb = total_size / (1024 ** 2)
 
-        return {
+        result = {
             'total_bytes': total_size,
             'total_mb': round(size_mb, 2),
             'total_gb': round(size_gb, 2),
             'file_count': file_count
         }
+        
+        # Update cache
+        self._storage_stats_cache = result
+        self._storage_stats_cache_time = time.time()
+        
+        return result
+    
+    def invalidate_storage_cache(self):
+        """Invalidate storage statistics cache."""
+        self._storage_stats_cache = None
+        self._storage_stats_cache_time = 0
+        self._detailed_storage_stats_cache = None
+        self._detailed_storage_stats_cache_time = 0
+        logger.debug("Storage statistics cache invalidated")
+    
+    def get_detailed_storage_stats(self, use_cache: bool = True, max_folders: int = 100) -> Dict:
+        """
+        Get detailed storage statistics with breakdown by category, disk, and individual folders.
+
+        Args:
+            use_cache: If True, use cached results if available and not expired
+            max_folders: Maximum number of folders to track per category (for performance)
+
+        Returns:
+            Dictionary with detailed storage stats by category, disk, and folders
+        """
+        # Check cache
+        if use_cache:
+            current_time = time.time()
+            if (self._detailed_storage_stats_cache is not None and 
+                current_time - self._detailed_storage_stats_cache_time < self._detailed_storage_stats_cache_ttl):
+                logger.debug("Returning cached detailed storage stats")
+                return self._detailed_storage_stats_cache
+        
+        from pathlib import Path
+        import os
+        
+        logger.info("Calculating detailed storage statistics (this may take a while)...")
+        
+        categories = {
+            'binaries': {
+                'paths': [],
+                'size': 0,
+                'file_count': 0,
+                'by_disk': {},
+                'folders': {}
+            },
+            'descriptions': {
+                'paths': [],
+                'size': 0,
+                'file_count': 0,
+                'by_disk': {},
+                'folders': {}
+            },
+            'metadata': {
+                'paths': [],
+                'size': 0,
+                'file_count': 0,
+                'by_disk': {},
+                'folders': {}
+            }
+        }
+        
+        # Add binaries directories
+        for product_dir in settings.PRODUCT_STORAGE_MAP.values():
+            if os.path.exists(product_dir):
+                categories['binaries']['paths'].append(product_dir)
+        if os.path.exists(settings.BINARIES_BASE_DIR):
+            categories['binaries']['paths'].append(settings.BINARIES_BASE_DIR)
+        if os.path.exists(settings.BINARIES_DIR):
+            categories['binaries']['paths'].append(settings.BINARIES_DIR)
+        
+        # Add descriptions directory
+        if os.path.exists(settings.DESCRIPTIONS_DIR):
+            categories['descriptions']['paths'].append(settings.DESCRIPTIONS_DIR)
+        
+        # Add metadata directory
+        if os.path.exists(settings.METADATA_DIR):
+            categories['metadata']['paths'].append(settings.METADATA_DIR)
+        
+        # Calculate stats for each category
+        for category, data in categories.items():
+            for path in data['paths']:
+                if not os.path.exists(path):
+                    continue
+                
+                # Get disk drive
+                drive = Path(path).anchor
+                if drive not in data['by_disk']:
+                    data['by_disk'][drive] = {'size': 0, 'file_count': 0}
+                
+                # Track individual folders
+                path_str = str(path)
+                if path_str not in data['folders']:
+                    data['folders'][path_str] = {'size': 0, 'file_count': 0, 'drive': drive}
+                
+                # Walk through directory (limit depth for performance)
+                folder_count = 0
+                for root, dirs, files in os.walk(path):
+                    # Calculate size for current directory
+                    dir_size = 0
+                    dir_file_count = 0
+                    
+                    for file in files:
+                        file_path = os.path.join(root, file)
+                        try:
+                            file_size = os.path.getsize(file_path)
+                            dir_size += file_size
+                            dir_file_count += 1
+                            data['size'] += file_size
+                            data['file_count'] += 1
+                            data['by_disk'][drive]['size'] += file_size
+                            data['by_disk'][drive]['file_count'] += 1
+                        except OSError:
+                            pass
+                    
+                    # Store folder stats (only for top-level folders to avoid too much detail)
+                    # Limit number of folders tracked for performance
+                    if folder_count < max_folders:
+                        if root == path or os.path.dirname(root) == path:
+                            folder_key = os.path.basename(root) if root != path else os.path.basename(path)
+                            if folder_key and folder_key not in ['.', '..']:
+                                full_folder_path = root if root != path else path
+                                if full_folder_path not in data['folders']:
+                                    data['folders'][full_folder_path] = {
+                                        'size': dir_size,
+                                        'file_count': dir_file_count,
+                                        'drive': drive
+                                    }
+                                    folder_count += 1
+                                else:
+                                    data['folders'][full_folder_path]['size'] += dir_size
+                                    data['folders'][full_folder_path]['file_count'] += dir_file_count
+        
+        # Convert to human-readable format
+        result = {
+            'categories': {},
+            'total': {
+                'bytes': 0,
+                'mb': 0,
+                'gb': 0,
+                'file_count': 0
+            },
+            'by_disk': {},
+            'folders': {}
+        }
+        
+        for category, data in categories.items():
+            size_gb = data['size'] / (1024 ** 3)
+            size_mb = data['size'] / (1024 ** 2)
+            
+            result['categories'][category] = {
+                'bytes': data['size'],
+                'mb': round(size_mb, 2),
+                'gb': round(size_gb, 2),
+                'file_count': data['file_count'],
+                'by_disk': {},
+                'folders': []
+            }
+            
+            # Add by_disk breakdown
+            for drive, disk_data in data['by_disk'].items():
+                disk_size_gb = disk_data['size'] / (1024 ** 3)
+                disk_size_mb = disk_data['size'] / (1024 ** 2)
+                result['categories'][category]['by_disk'][drive] = {
+                    'bytes': disk_data['size'],
+                    'mb': round(disk_size_mb, 2),
+                    'gb': round(disk_size_gb, 2),
+                    'file_count': disk_data['file_count']
+                }
+                
+                # Add to total by disk
+                if drive not in result['by_disk']:
+                    result['by_disk'][drive] = {'bytes': 0, 'mb': 0, 'gb': 0, 'file_count': 0}
+                result['by_disk'][drive]['bytes'] += disk_data['size']
+                result['by_disk'][drive]['file_count'] += disk_data['file_count']
+            
+            # Add folder breakdown
+            for folder_path, folder_data in data['folders'].items():
+                folder_size_gb = folder_data['size'] / (1024 ** 3)
+                folder_size_mb = folder_data['size'] / (1024 ** 2)
+                result['categories'][category]['folders'].append({
+                    'path': folder_path,
+                    'name': os.path.basename(folder_path) or folder_path,
+                    'bytes': folder_data['size'],
+                    'mb': round(folder_size_mb, 2),
+                    'gb': round(folder_size_gb, 2),
+                    'file_count': folder_data['file_count'],
+                    'drive': folder_data['drive']
+                })
+            
+            # Sort folders by size (largest first)
+            result['categories'][category]['folders'].sort(key=lambda x: x['bytes'], reverse=True)
+            
+            result['total']['bytes'] += data['size']
+            result['total']['file_count'] += data['file_count']
+        
+        # Convert totals
+        result['total']['gb'] = round(result['total']['bytes'] / (1024 ** 3), 2)
+        result['total']['mb'] = round(result['total']['bytes'] / (1024 ** 2), 2)
+        
+        # Convert by_disk totals
+        for drive in result['by_disk']:
+            result['by_disk'][drive]['gb'] = round(result['by_disk'][drive]['bytes'] / (1024 ** 3), 2)
+            result['by_disk'][drive]['mb'] = round(result['by_disk'][drive]['bytes'] / (1024 ** 2), 2)
+        
+        # Update cache
+        self._detailed_storage_stats_cache = result
+        self._detailed_storage_stats_cache_time = time.time()
+        
+        logger.info("Detailed storage statistics calculated successfully")
+        return result

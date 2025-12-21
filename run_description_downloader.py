@@ -4,6 +4,8 @@
 import sys
 import io
 import argparse
+import time
+from datetime import datetime
 
 # Fix encoding for Windows console
 if sys.platform == 'win32':
@@ -60,12 +62,21 @@ def main():
 
     if args.addon_key:
         # Download for specific app
-        print(f"\nDownloading description for: {args.addon_key}")
+        start_time = time.time()
+        print(f"\n{'='*60}")
+        print(f"Downloading description for: {args.addon_key}")
+        print(f"Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"{'='*60}\n")
+        sys.stdout.flush()  # Force output to console
         
         # Get app from database to get marketplace_url
+        print("[1/6] Getting app information from database...")
+        sys.stdout.flush()
         app = store.get_app_by_key(args.addon_key)
         marketplace_url = None
         if app:
+            print(f"  ✓ App found: {app.get('name', 'Unknown')}")
+            sys.stdout.flush()
             # Handle marketplace_url - can be string or dict
             marketplace_url_raw = app.get('marketplace_url')
             if marketplace_url_raw:
@@ -77,25 +88,80 @@ def main():
         # If marketplace_url is empty, construct it
         if not marketplace_url:
             marketplace_url = f"https://marketplace.atlassian.com/apps/{args.addon_key}?hosting=datacenter&tab=overview"
-            print(f"Constructed marketplace URL: {marketplace_url}")
+            print(f"  ⚠ Marketplace URL not found, constructed: {marketplace_url}")
+        else:
+            print(f"  ✓ Marketplace URL: {marketplace_url}")
+        sys.stdout.flush()
+        
+        print(f"\n[2/6] Starting download process...")
+        print(f"  - Download media: {'Yes' if args.download_media else 'No'}")
+        print(f"  - Hosting types: datacenter (preferred), server (if datacenter not available)")
+        print(f"  - Method: {'Full page + API' if not args.use_api else 'API only'}")
+        print()
+        sys.stdout.flush()
         
         # Always use download_description - it handles both full_page and API
         # If marketplace_url is provided and not use_api, it will download full_page + API
         # If use_api is True, it will only download API description
-        json_path, html_path = downloader.download_description(
-            args.addon_key,
-            download_media=args.download_media,
-            marketplace_url=marketplace_url if not args.use_api else None
-        )
+        # By default, download for datacenter, server, and cloud
+        try:
+            json_path, html_path = downloader.download_description(
+                args.addon_key,
+                download_media=args.download_media,
+                marketplace_url=marketplace_url if not args.use_api else None,
+                download_all_hosting=True  # Download for datacenter, server, and cloud
+            )
+        except KeyboardInterrupt:
+            print("\n\n[!] Download interrupted by user")
+            elapsed_time = time.time() - start_time
+            print(f"Elapsed time: {elapsed_time:.1f} seconds")
+            sys.exit(1)
+        except Exception as e:
+            print(f"\n[ERROR] Download failed: {str(e)}")
+            elapsed_time = time.time() - start_time
+            print(f"Elapsed time: {elapsed_time:.1f} seconds")
+            import traceback
+            traceback.print_exc()
+            sys.exit(1)
+        
+        elapsed_time = time.time() - start_time
+        
+        print(f"\n[3/6] Download completed in {elapsed_time:.1f} seconds")
         
         if json_path or html_path:
-            print(f"[OK] Description saved:")
+            print(f"\n[4/6] Files saved:")
             if json_path:
-                print(f"  JSON: {json_path}")
+                file_size = json_path.stat().st_size if json_path.exists() else 0
+                size_kb = file_size / 1024
+                print(f"  ✓ JSON: {json_path}")
+                print(f"    Size: {size_kb:.1f} KB")
             if html_path:
-                print(f"  HTML: {html_path}")
+                file_size = html_path.stat().st_size if html_path.exists() else 0
+                size_kb = file_size / 1024
+                size_mb = file_size / (1024 * 1024)
+                size_str = f"{size_mb:.1f} MB" if size_mb >= 1 else f"{size_kb:.1f} KB"
+                print(f"  ✓ HTML: {html_path}")
+                print(f"    Size: {size_str}")
+            
+            # Check for assets directory
+            if html_path:
+                assets_dir = html_path.parent / 'assets'
+                if assets_dir.exists():
+                    assets_size = sum(f.stat().st_size for f in assets_dir.rglob('*') if f.is_file())
+                    assets_mb = assets_size / (1024 * 1024)
+                    assets_count = len(list(assets_dir.rglob('*')))
+                    print(f"  ✓ Assets: {assets_dir}")
+                    print(f"    Files: {assets_count}, Size: {assets_mb:.1f} MB")
+            
+            print(f"\n[5/6] Summary:")
+            print(f"  ✓ Total time: {elapsed_time:.1f} seconds")
+            print(f"  ✓ Status: Success")
+            
+            print(f"\n[6/6] Done!")
+            print(f"Completed at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         else:
-            print(f"[ERROR] Failed to download description for {args.addon_key}")
+            print(f"\n[ERROR] Failed to download description for {args.addon_key}")
+            print(f"Elapsed time: {elapsed_time:.1f} seconds")
             sys.exit(1)
     else:
         # Download for all apps

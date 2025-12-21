@@ -4,6 +4,7 @@ import requests
 from typing import List, Dict, Optional
 from config import settings
 from utils.logger import get_logger
+from utils.credentials import get_credentials_rotator, CredentialsRotator
 
 logger = get_logger('scraper')
 
@@ -11,17 +12,34 @@ logger = get_logger('scraper')
 class MarketplaceAPIv3:
     """Client for Atlassian Marketplace REST API v3."""
 
-    def __init__(self, username=None, api_token=None, metadata_store=None):
+    def __init__(self, username=None, api_token=None, metadata_store=None, use_rotation=False, rotator: Optional[CredentialsRotator] = None):
         """
         Initialize the Marketplace API v3 client.
 
         Args:
-            username: Atlassian account username (email)
-            api_token: API token from Atlassian
+            username: Atlassian account username (email) - if provided, uses this account
+            api_token: API token from Atlassian - if provided, uses this token
             metadata_store: Optional MetadataStore instance for caching
+            use_rotation: If True, uses credential rotation for parallel requests
+            rotator: Optional CredentialsRotator instance (if None and use_rotation=True, uses global rotator)
         """
-        self.username = username or settings.MARKETPLACE_USERNAME
-        self.api_token = api_token or settings.MARKETPLACE_API_TOKEN
+        self.use_rotation = use_rotation
+        self.rotator = rotator or (get_credentials_rotator() if use_rotation else None)
+        
+        if username and api_token:
+            # Use provided credentials
+            self.username = username
+            self.api_token = api_token
+        elif use_rotation and self.rotator:
+            # Use rotation - get next credentials
+            creds = self.rotator.get_next()
+            self.username = creds.get('username') if creds else settings.MARKETPLACE_USERNAME
+            self.api_token = creds.get('api_token') if creds else settings.MARKETPLACE_API_TOKEN
+        else:
+            # Use settings/default
+            self.username = username or settings.MARKETPLACE_USERNAME
+            self.api_token = api_token or settings.MARKETPLACE_API_TOKEN
+        
         self.session = requests.Session()
 
         if self.username and self.api_token:
@@ -34,6 +52,16 @@ class MarketplaceAPIv3:
 
         # In-memory cache for parent software versions (session-only)
         self._parent_software_cache = {}
+    
+    def rotate_credentials(self):
+        """Rotate to next credentials if using rotation."""
+        if self.use_rotation and self.rotator:
+            creds = self.rotator.get_next()
+            if creds:
+                self.username = creds.get('username', '')
+                self.api_token = creds.get('api_token', '')
+                self.session.auth = (self.username, self.api_token)
+                logger.debug(f"Rotated to credentials for: {self.username}")
 
     def get_app_software_ids(self, addon_key: str) -> List[Dict]:
         """

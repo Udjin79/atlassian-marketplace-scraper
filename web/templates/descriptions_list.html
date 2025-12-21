@@ -62,6 +62,12 @@
                                         <i class="bi bi-file-earmark-code"></i> Full Page
                                     </a>
                                     {% endif %}
+                                    {% if item.documentation_url %}
+                                    <a href="{{ item.documentation_url }}" 
+                                       target="_blank" class="btn btn-sm btn-info">
+                                        <i class="bi bi-book"></i> Documentation
+                                    </a>
+                                    {% endif %}
                                     <a href="{{ url_for('app_detail', addon_key=item.addon_key) }}" 
                                        class="btn btn-sm btn-outline-secondary">
                                         <i class="bi bi-info-circle"></i> App Details
