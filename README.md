@@ -2,6 +2,8 @@
 
 A Python-based service to scrape the Atlassian Marketplace for Server/Data Center apps and versions, download binaries, and provide a web interface for browsing the collected data.
 
+The stable release line is maintained in the `stable` branch.
+
 ## Features
 
 - **Complete Marketplace Scraping**: Scrapes all apps across Jira, Confluence, Bitbucket, Bamboo, and Crowd
