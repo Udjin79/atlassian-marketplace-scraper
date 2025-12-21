@@ -69,6 +69,10 @@ FLASK_DEBUG = config('FLASK_DEBUG', default=True, cast=bool)
 FLASK_PORT = config('FLASK_PORT', default=5000, cast=int)
 SECRET_KEY = config('SECRET_KEY', default='dev-secret-key-change-in-production')
 
+# Admin credentials for management interface
+ADMIN_USERNAME = config('ADMIN_USERNAME', default='')
+ADMIN_PASSWORD = config('ADMIN_PASSWORD', default='')
+
 # Logging Settings
 LOG_LEVEL = config('LOG_LEVEL', default='INFO')
 
@@ -94,3 +98,58 @@ for directory in [METADATA_DIR, VERSIONS_DIR, CHECKPOINTS_DIR, BINARIES_DIR, LOG
 # Ensure product-specific binary directories exist
 for product_dir in PRODUCT_STORAGE_MAP.values():
     os.makedirs(product_dir, exist_ok=True)
+
+
+def validate_security_settings():
+    """
+    Validate critical security settings on startup.
+
+    Raises:
+        ValueError: If critical security settings are missing or insecure
+    """
+    errors = []
+    warnings = []
+
+    # Check SECRET_KEY
+    if SECRET_KEY == 'dev-secret-key-change-in-production':
+        errors.append("SECRET_KEY must be changed from default value. Generate a secure key with: python -c \"import secrets; print(secrets.token_hex(32))\"")
+    elif len(SECRET_KEY) < 32:
+        warnings.append("SECRET_KEY should be at least 32 characters for security")
+
+    # Check admin credentials
+    if not ADMIN_USERNAME or not ADMIN_PASSWORD:
+        errors.append("ADMIN_USERNAME and ADMIN_PASSWORD must be set in .env file to protect management interface")
+    elif len(ADMIN_PASSWORD) < 8:
+        warnings.append("ADMIN_PASSWORD should be at least 8 characters")
+
+    # Check marketplace credentials
+    if not MARKETPLACE_USERNAME or not MARKETPLACE_API_TOKEN:
+        warnings.append("MARKETPLACE_USERNAME and MARKETPLACE_API_TOKEN not set - scraping will fail")
+
+    # Display warnings
+    if warnings:
+        import sys
+        print("\n⚠️  SECURITY WARNINGS:", file=sys.stderr)
+        for warning in warnings:
+            print(f"   - {warning}", file=sys.stderr)
+        print()
+
+    # Raise errors
+    if errors:
+        error_msg = "\n❌ CRITICAL SECURITY ERRORS:\n" + "\n".join(f"   - {e}" for e in errors)
+        error_msg += "\n\nPlease fix these issues in your .env file before starting the application.\n"
+        raise ValueError(error_msg)
+
+
+# Validate settings when module is imported (but allow bypassing for migrations/scripts)
+if os.environ.get('SKIP_SECURITY_VALIDATION') != '1':
+    try:
+        validate_security_settings()
+    except ValueError as e:
+        # Only raise if running the web app
+        import sys
+        if 'app.py' in sys.argv[0] or 'flask' in sys.argv[0]:
+            raise
+        else:
+            # For CLI scripts, just warn
+            print(str(e))

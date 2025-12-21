@@ -10,6 +10,7 @@ from scraper.download_manager import DownloadManager
 from utils.logger import get_logger
 from utils.task_manager import get_task_manager
 from utils.settings_manager import read_env_settings, update_env_setting
+from utils.auth import requires_auth
 
 logger = get_logger('web')
 
@@ -568,6 +569,7 @@ def register_routes(app):
     # Management Routes
     
     @app.route('/manage')
+    @requires_auth
     def manage():
         """Management page for tasks and settings."""
         try:
@@ -626,6 +628,7 @@ def register_routes(app):
             return render_template('error.html', error=str(e)), 500
 
     @app.route('/api/tasks/start/scrape-apps', methods=['POST'])
+    @requires_auth
     def api_start_scrape_apps():
         """Start app scraping task."""
         try:
@@ -645,6 +648,7 @@ def register_routes(app):
             return jsonify({'success': False, 'error': str(e)}), 500
 
     @app.route('/api/tasks/start/scrape-versions', methods=['POST'])
+    @requires_auth
     def api_start_scrape_versions():
         """Start version scraping task."""
         try:
@@ -661,6 +665,7 @@ def register_routes(app):
             return jsonify({'success': False, 'error': str(e)}), 500
 
     @app.route('/api/tasks/start/download', methods=['POST'])
+    @requires_auth
     def api_start_download():
         """Start binary download task."""
         try:
@@ -680,6 +685,7 @@ def register_routes(app):
             return jsonify({'success': False, 'error': str(e)}), 500
 
     @app.route('/api/tasks/start/download-descriptions', methods=['POST'])
+    @requires_auth
     def api_start_download_descriptions():
         """Start description download task."""
         try:
@@ -700,6 +706,7 @@ def register_routes(app):
             return jsonify({'success': False, 'error': str(e)}), 500
 
     @app.route('/api/tasks/start/pipeline', methods=['POST'])
+    @requires_auth
     def api_start_pipeline():
         """Start full pipeline: scrape apps → versions → binaries → descriptions."""
         try:
@@ -758,6 +765,7 @@ def register_routes(app):
             return jsonify({'success': False, 'error': str(e)}), 500
 
     @app.route('/api/tasks/<task_id>/cancel', methods=['POST'])
+    @requires_auth
     def api_cancel_task(task_id):
         """Cancel a running task."""
         try:
@@ -779,6 +787,7 @@ def register_routes(app):
             return jsonify({'success': False, 'error': str(e)}), 500
 
     @app.route('/api/tasks/clear-completed', methods=['POST'])
+    @requires_auth
     def api_clear_completed_tasks():
         """Clear all completed, failed, and cancelled tasks."""
         try:
