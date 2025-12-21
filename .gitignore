@@ -1,5 +1,6 @@
 # Credentials (never commit)
 .credentials.json
+.encryption_key
 
 # Environment variables
 .env
