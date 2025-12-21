@@ -1157,51 +1157,18 @@ const taskLogCache = {};
 // Task Status function
 function refreshTaskStatus() {
     const scrollY = window.scrollY;
-    
-    fetchWithCSRF('/api/tasks')
+    fetchWithCSRF('/api/tasks?lightweight=true')
     .then(r => r.json())
     .then(data => {
         if (data.success && data.tasks) {
-            const tasks = Object.entries(data.tasks).sort((a, b) => {
-                const timeA = new Date(a[1].started_at || 0).getTime();
-                const timeB = new Date(b[1].started_at || 0).getTime();
-                return timeB - timeA; // Newest first
-            });
-            
-            // Group tasks by status
-            const tasksByStatus = {
-                'all': tasks,
-                'running': tasks.filter(([_, task]) => task.status === 'running'),
-                'completed': tasks.filter(([_, task]) => task.status === 'completed'),
-                'failed': tasks.filter(([_, task]) => task.status === 'failed'),
-                'cancelled': tasks.filter(([_, task]) => task.status === 'cancelled')
-            };
-            
-            // Render each tab
-            Object.keys(tasksByStatus).forEach(status => {
-                const container = document.getElementById(`task-status-container-${status}`);
-                renderTasksTable(container, tasksByStatus[status], status === 'running');
-            });
-            
-            // Update last update time
-            const now = new Date();
-            document.getElementById('last-update-time').textContent = 
-                `Last update: ${now.toLocaleTimeString()}`;
-            
-            // Load logs for running tasks
-            if (tasksByStatus.running.length > 0) {
-                loadTaskLogs(tasksByStatus.running.map(([id]) => id));
-            }
-            
-            // Restore scroll position
-            requestAnimationFrame(() => {
-                window.scrollTo(0, scrollY);
-            });
+            refreshTaskStatusFromData(data.tasks);
         } else {
             // Clear all containers
             ['all', 'running', 'completed', 'failed', 'cancelled'].forEach(status => {
                 const container = document.getElementById(`task-status-container-${status}`);
-                container.innerHTML = '<p class="text-muted">No tasks found.</p>';
+                if (container) {
+                    container.innerHTML = '<p class="text-muted">No tasks found.</p>';
+                }
             });
             window.scrollTo(0, scrollY);
         }
@@ -1209,7 +1176,9 @@ function refreshTaskStatus() {
     .catch(e => {
         ['all', 'running', 'completed', 'failed', 'cancelled'].forEach(status => {
             const container = document.getElementById(`task-status-container-${status}`);
-            container.innerHTML = `<p class="text-danger">Error loading tasks: ${e.message}</p>`;
+            if (container) {
+                container.innerHTML = `<p class="text-danger">Error loading tasks: ${e.message}</p>`;
+            }
         });
         window.scrollTo(0, scrollY);
     });
@@ -1272,10 +1241,23 @@ function renderTasksTable(container, tasks, loadLogs = false) {
 }
 
 function loadTaskLogs(taskIds) {
-    taskIds.forEach(taskId => {
+    if (!taskIds || taskIds.length === 0) {
+        return;
+    }
+    
+    // Load logs in parallel (batch requests)
+    const logPromises = taskIds.map(taskId => 
         fetch(`/api/tasks/${taskId}/last-log`)
-        .then(r => r.json())
-        .then(data => {
+            .then(r => r.json())
+            .then(data => ({ taskId, data }))
+            .catch(e => {
+                console.error(`Error loading log for ${taskId}:`, e);
+                return { taskId, data: { success: false } };
+            })
+    );
+    
+    Promise.all(logPromises).then(results => {
+        results.forEach(({ taskId, data }) => {
             if (data.success) {
                 // Update cache
                 taskLogCache[taskId] = {
@@ -1296,9 +1278,6 @@ function loadTaskLogs(taskIds) {
                     }
                 }
             }
-        })
-        .catch(e => {
-            console.error(`Error loading log for ${taskId}:`, e);
         });
     });
 }
@@ -1337,15 +1316,89 @@ function clearCompletedTasks() {
 let refreshInterval;
 let logRefreshInterval;
 document.addEventListener('DOMContentLoaded', function() {
-    refreshTaskStatus();
-    loadLogFiles();
+    // Load initial data in parallel
+    Promise.all([
+        fetch('/api/credentials').then(r => r.json()),
+        fetch('/api/tasks?lightweight=true').then(r => r.json()),
+        fetch('/api/logs').then(r => r.json())
+    ]).then(([credentialsData, tasksData, logsData]) => {
+        // Handle credentials
+        if (credentialsData.success) {
+            const container = document.getElementById('accounts-container');
+            const badge = document.getElementById('credentials-count-badge');
+            if (container && badge) {
+                badge.textContent = `${credentialsData.count} account(s)`;
+                if (credentialsData.rotation_enabled) {
+                    badge.className = 'badge bg-success';
+                    badge.title = 'Rotation enabled - accounts will be rotated automatically';
+                } else {
+                    badge.className = 'badge bg-secondary';
+                    badge.title = 'Single account - add more for rotation';
+                }
+                
+                if (credentialsData.accounts && credentialsData.accounts.length > 0) {
+                    container.innerHTML = credentialsData.accounts.map((acc, index) => `
+                        <div class="card mb-2">
+                            <div class="card-body p-2">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <strong>${acc.username || '(No username)'}</strong>
+                                        <br><small class="text-muted">Token: ${acc.api_token || 'Not set'}</small>
+                                    </div>
+                                    <button class="btn btn-sm btn-danger" onclick="removeAccount(${index})">
+                                        <i class="bi bi-trash"></i> Remove
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    `).join('');
+                } else {
+                    container.innerHTML = '<div class="alert alert-warning">No accounts configured. Add an account below.</div>';
+                }
+            }
+        }
+        
+        // Handle tasks
+        if (tasksData.success && tasksData.tasks) {
+            refreshTaskStatusFromData(tasksData.tasks);
+        }
+        
+        // Handle logs
+        if (logsData.success) {
+            const select = document.getElementById('log-file-select');
+            if (select) {
+                select.innerHTML = '<option value="">-- Select a log file --</option>';
+                logsData.logs.forEach(log => {
+                    const sizeKB = (log.size / 1024).toFixed(2);
+                    const option = document.createElement('option');
+                    option.value = log.name;
+                    option.textContent = `${log.name} (${sizeKB} KB)`;
+                    select.appendChild(option);
+                });
+            }
+        }
+    }).catch(e => {
+        console.error('Error loading initial data:', e);
+        // Fallback to sequential loading
+        refreshTaskStatus();
+        loadLogFiles();
+    });
     
-    // Refresh task status every 5 seconds
-    refreshInterval = setInterval(refreshTaskStatus, 5000);
+    // Refresh task status every 10 seconds (increased from 5)
+    refreshInterval = setInterval(() => {
+        fetch('/api/tasks?lightweight=true')
+            .then(r => r.json())
+            .then(data => {
+                if (data.success && data.tasks) {
+                    refreshTaskStatusFromData(data.tasks);
+                }
+            })
+            .catch(e => console.error('Error refreshing tasks:', e));
+    }, 10000);
     
-    // Refresh logs for running tasks every 5 seconds
+    // Refresh logs for running tasks every 10 seconds (increased from 5)
     logRefreshInterval = setInterval(() => {
-        fetchWithCSRF('/api/tasks')
+        fetchWithCSRF('/api/tasks?lightweight=true')
         .then(r => r.json())
         .then(data => {
             if (data.success && data.tasks) {
@@ -1357,16 +1410,62 @@ document.addEventListener('DOMContentLoaded', function() {
                     loadTaskLogs(runningTasks);
                     // Update last update time
                     const now = new Date();
-                    document.getElementById('last-update-time').textContent = 
-                        `Last update: ${now.toLocaleTimeString()}`;
+                    const updateEl = document.getElementById('last-update-time');
+                    if (updateEl) {
+                        updateEl.textContent = `Last update: ${now.toLocaleTimeString()}`;
+                    }
                 }
             }
         })
         .catch(e => console.error('Error refreshing logs:', e));
-    }, 5000);
+    }, 10000);
     
     setInterval(loadLogFiles, 60000); // Refresh log list every minute
 });
+
+function refreshTaskStatusFromData(tasks) {
+    const scrollY = window.scrollY;
+    
+    const tasksList = Object.entries(tasks).sort((a, b) => {
+        const timeA = new Date(a[1].started_at || 0).getTime();
+        const timeB = new Date(b[1].started_at || 0).getTime();
+        return timeB - timeA; // Newest first
+    });
+    
+    // Group tasks by status
+    const tasksByStatus = {
+        'all': tasksList,
+        'running': tasksList.filter(([_, task]) => task.status === 'running'),
+        'completed': tasksList.filter(([_, task]) => task.status === 'completed'),
+        'failed': tasksList.filter(([_, task]) => task.status === 'failed'),
+        'cancelled': tasksList.filter(([_, task]) => task.status === 'cancelled')
+    };
+    
+    // Render each tab
+    Object.keys(tasksByStatus).forEach(status => {
+        const container = document.getElementById(`task-status-container-${status}`);
+        if (container) {
+            renderTasksTable(container, tasksByStatus[status], status === 'running');
+        }
+    });
+    
+    // Update last update time
+    const now = new Date();
+    const updateEl = document.getElementById('last-update-time');
+    if (updateEl) {
+        updateEl.textContent = `Last update: ${now.toLocaleTimeString()}`;
+    }
+    
+    // Load logs for running tasks
+    if (tasksByStatus.running.length > 0) {
+        loadTaskLogs(tasksByStatus.running.map(([id]) => id));
+    }
+    
+    // Restore scroll position
+    requestAnimationFrame(() => {
+        window.scrollTo(0, scrollY);
+    });
+}
 
 // Stop refreshing when page is hidden
 document.addEventListener('visibilitychange', function() {

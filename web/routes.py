@@ -816,15 +816,52 @@ def register_routes(app):
 
     @app.route('/api/tasks')
     def api_all_tasks():
-        """Get all tasks."""
+        """Get all tasks. Optionally return lightweight version without full output."""
         try:
             task_mgr = get_task_manager()
             tasks = task_mgr.get_all_tasks()
             
-            return jsonify({
-                'success': True,
-                'tasks': tasks
-            })
+            # Check if lightweight version is requested (for faster loading)
+            lightweight = request.args.get('lightweight', 'false').lower() == 'true'
+            
+            if lightweight:
+                # Return tasks without full output to reduce payload size
+                lightweight_tasks = {}
+                for task_id, task in tasks.items():
+                    lightweight_task = {
+                        'status': task.get('status'),
+                        'started_at': task.get('started_at'),
+                        'finished_at': task.get('finished_at'),
+                        'script': task.get('script'),
+                        'progress': task.get('progress'),
+                        'message': task.get('message'),
+                        'current_action': task.get('current_action'),
+                        'pid': task.get('pid'),
+                        'return_code': task.get('return_code'),
+                        'error': task.get('error'),
+                        'steps': task.get('steps'),
+                        'current_step': task.get('current_step'),
+                        'total_steps': task.get('total_steps')
+                    }
+                    # Include only last 500 chars of output if exists
+                    if 'output' in task and task['output']:
+                        output = task['output']
+                        if len(output) > 500:
+                            lightweight_task['output'] = '...' + output[-500:]
+                        else:
+                            lightweight_task['output'] = output
+                    lightweight_tasks[task_id] = lightweight_task
+                
+                return jsonify({
+                    'success': True,
+                    'tasks': lightweight_tasks,
+                    'lightweight': True
+                })
+            else:
+                return jsonify({
+                    'success': True,
+                    'tasks': tasks
+                })
         except Exception as e:
             logger.error(f"Error getting tasks: {str(e)}")
             return jsonify({'success': False, 'error': str(e)}), 500
@@ -870,7 +907,7 @@ def register_routes(app):
 
     @app.route('/api/tasks/<task_id>/last-log')
     def api_task_last_log(task_id):
-        """Get last log line for a task."""
+        """Get last log line for a task. Optimized for fast response."""
         try:
             task_mgr = get_task_manager()
             log_file = task_mgr.get_task_log_file(task_id)
@@ -882,10 +919,28 @@ def register_routes(app):
                     'timestamp': None
                 })
             
-            # Read last line from log file
+            # Read last line from log file (optimized for large files)
             try:
-                with open(log_file, 'r', encoding='utf-8', errors='replace') as f:
-                    lines = f.readlines()
+                # Read last 8KB of file to find last line (more efficient than reading entire file)
+                with open(log_file, 'rb') as f:
+                    # Seek to end
+                    f.seek(0, 2)
+                    file_size = f.tell()
+                    
+                    if file_size == 0:
+                        return jsonify({
+                            'success': True,
+                            'log_line': None,
+                            'timestamp': None
+                        })
+                    
+                    # Read last 8KB (or entire file if smaller)
+                    read_size = min(8192, file_size)
+                    f.seek(max(0, file_size - read_size))
+                    chunk = f.read(read_size).decode('utf-8', errors='replace')
+                    
+                    # Find last line
+                    lines = chunk.splitlines()
                     if lines:
                         last_line = lines[-1].strip()
                         # Try to extract timestamp from log line
