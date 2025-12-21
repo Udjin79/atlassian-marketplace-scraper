@@ -114,109 +114,151 @@ def _decrypt_string(encrypted: str) -> str:
 
 def get_credentials() -> Dict[str, str]:
     """
-    Get credentials from .credentials.json file.
+    Get credentials from .credentials.json file with fallback to .env.
+
     Supports both old format (single credentials) and new format (multiple accounts).
     Credentials are automatically decrypted if stored encrypted.
 
+    Fallback priority:
+    1. .credentials.json (supports multiple accounts, encrypted)
+    2. .env file (simple single account setup)
+
     Returns:
-        Dictionary with credentials (username, api_token) or list of accounts
+        Dictionary with credentials (username, api_token)
     """
-    if not os.path.exists(CREDENTIALS_FILE):
-        return {
-            'username': '',
-            'api_token': ''
-        }
+    credentials = {'username': '', 'api_token': ''}
 
-    try:
-        with open(CREDENTIALS_FILE, 'r', encoding='utf-8') as f:
-            data = json.load(f)
+    # Try loading from .credentials.json first
+    if os.path.exists(CREDENTIALS_FILE):
+        try:
+            with open(CREDENTIALS_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
 
-            # Check if encrypted format
-            is_encrypted = data.get('encrypted', False)
+                # Check if encrypted format
+                is_encrypted = data.get('encrypted', False)
 
-            # Check if it's the new format with multiple accounts
-            if isinstance(data, dict) and 'accounts' in data:
-                # Return first account for backward compatibility
-                accounts = data.get('accounts', [])
-                if accounts:
-                    account = accounts[0]
-                    if is_encrypted:
-                        return {
-                            'username': _decrypt_string(account.get('username', '')) if account.get('username') else '',
-                            'api_token': _decrypt_string(account.get('api_token', '')) if account.get('api_token') else ''
-                        }
-                    return {
-                        'username': account.get('username', ''),
-                        'api_token': account.get('api_token', '')
+                # Check if it's the new format with multiple accounts
+                if isinstance(data, dict) and 'accounts' in data:
+                    # Return first account for backward compatibility
+                    accounts = data.get('accounts', [])
+                    if accounts:
+                        account = accounts[0]
+                        if is_encrypted:
+                            credentials = {
+                                'username': _decrypt_string(account.get('username', '')) if account.get('username') else '',
+                                'api_token': _decrypt_string(account.get('api_token', '')) if account.get('api_token') else ''
+                            }
+                        else:
+                            credentials = {
+                                'username': account.get('username', ''),
+                                'api_token': account.get('api_token', '')
+                            }
+
+                # Old format - single credentials
+                elif is_encrypted:
+                    logger.info("Credentials are encrypted - decrypting")
+                    credentials = {
+                        'username': _decrypt_string(data.get('username', '')) if data.get('username') else '',
+                        'api_token': _decrypt_string(data.get('api_token', '')) if data.get('api_token') else ''
                     }
-                return {'username': '', 'api_token': ''}
+                else:
+                    logger.warning("Credentials are stored in plain text - will be encrypted on next save")
+                    credentials = {
+                        'username': data.get('username', ''),
+                        'api_token': data.get('api_token', '')
+                    }
+        except Exception as e:
+            logger.error(f"Error reading credentials file: {str(e)}")
 
-            # Old format - single credentials
-            if is_encrypted:
-                logger.warning("Credentials are encrypted - will decrypt")
-                return {
-                    'username': _decrypt_string(data.get('username', '')) if data.get('username') else '',
-                    'api_token': _decrypt_string(data.get('api_token', '')) if data.get('api_token') else ''
+    # Fallback to .env if credentials are empty
+    if not credentials.get('username') or not credentials.get('api_token'):
+        logger.info("Credentials empty in .credentials.json, checking .env file")
+        try:
+            from config import settings
+            env_username = settings.MARKETPLACE_USERNAME
+            env_token = settings.MARKETPLACE_API_TOKEN
+
+            if env_username and env_token:
+                logger.info("Using credentials from .env file")
+                credentials = {
+                    'username': env_username,
+                    'api_token': env_token
                 }
-            else:
-                logger.warning("Credentials are stored in plain text - will be encrypted on next save")
-                return data
-    except Exception as e:
-        logger.error(f"Error reading credentials file: {str(e)}")
-        return {
-            'username': '',
-            'api_token': ''
-        }
+        except Exception as e:
+            logger.error(f"Error reading credentials from .env: {str(e)}")
+
+    return credentials
 
 
 def get_all_credentials() -> List[Dict[str, str]]:
     """
-    Get all credentials from .credentials.json file.
+    Get all credentials from .credentials.json file with fallback to .env.
     Credentials are automatically decrypted if stored encrypted.
+
+    Fallback priority:
+    1. .credentials.json (supports multiple accounts, encrypted)
+    2. .env file (simple single account setup)
 
     Returns:
         List of dictionaries with credentials (username, api_token)
     """
-    if not os.path.exists(CREDENTIALS_FILE):
-        return []
+    accounts = []
 
-    try:
-        with open(CREDENTIALS_FILE, 'r', encoding='utf-8') as f:
-            data = json.load(f)
+    # Try loading from .credentials.json first
+    if os.path.exists(CREDENTIALS_FILE):
+        try:
+            with open(CREDENTIALS_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
 
-            # Check if encrypted format
-            is_encrypted = data.get('encrypted', False)
+                # Check if encrypted format
+                is_encrypted = data.get('encrypted', False)
 
-            # Check if it's the new format with multiple accounts
-            if isinstance(data, dict) and 'accounts' in data:
-                accounts = data.get('accounts', [])
-                if is_encrypted:
-                    # Decrypt all accounts
-                    decrypted_accounts = []
-                    for account in accounts:
-                        decrypted_accounts.append({
-                            'username': _decrypt_string(account.get('username', '')) if account.get('username') else '',
-                            'api_token': _decrypt_string(account.get('api_token', '')) if account.get('api_token') else ''
-                        })
-                    return decrypted_accounts
-                return accounts
+                # Check if it's the new format with multiple accounts
+                if isinstance(data, dict) and 'accounts' in data:
+                    account_list = data.get('accounts', [])
+                    if is_encrypted:
+                        # Decrypt all accounts
+                        for account in account_list:
+                            accounts.append({
+                                'username': _decrypt_string(account.get('username', '')) if account.get('username') else '',
+                                'api_token': _decrypt_string(account.get('api_token', '')) if account.get('api_token') else ''
+                            })
+                    else:
+                        accounts = account_list
 
-            # Old format - single credentials, convert to list
-            if isinstance(data, dict) and 'username' in data and data.get('username'):
-                if is_encrypted:
-                    return [{
-                        'username': _decrypt_string(data.get('username', '')) if data.get('username') else '',
-                        'api_token': _decrypt_string(data.get('api_token', '')) if data.get('api_token') else ''
-                    }]
-                return [{
-                    'username': data.get('username', ''),
-                    'api_token': data.get('api_token', '')
+                # Old format - single credentials, convert to list
+                elif isinstance(data, dict) and 'username' in data and data.get('username'):
+                    if is_encrypted:
+                        accounts = [{
+                            'username': _decrypt_string(data.get('username', '')) if data.get('username') else '',
+                            'api_token': _decrypt_string(data.get('api_token', '')) if data.get('api_token') else ''
+                        }]
+                    else:
+                        accounts = [{
+                            'username': data.get('username', ''),
+                            'api_token': data.get('api_token', '')
+                        }]
+        except Exception as e:
+            logger.error(f"Error reading credentials file: {str(e)}")
+
+    # Fallback to .env if no accounts found
+    if not accounts:
+        logger.info("No credentials in .credentials.json, checking .env file")
+        try:
+            from config import settings
+            env_username = settings.MARKETPLACE_USERNAME
+            env_token = settings.MARKETPLACE_API_TOKEN
+
+            if env_username and env_token:
+                logger.info("Using credentials from .env file")
+                accounts = [{
+                    'username': env_username,
+                    'api_token': env_token
                 }]
+        except Exception as e:
+            logger.error(f"Error reading credentials from .env: {str(e)}")
 
-            return []
-    except Exception as e:
-        logger.error(f"Error reading credentials file: {str(e)}")
-        return []
+    return accounts
 
 
 def save_credentials(username: str, api_token: str) -> bool:
