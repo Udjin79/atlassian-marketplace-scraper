@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+
+{% block title %}Descriptions - Atlassian Marketplace Scraper{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h2><i class="bi bi-file-text"></i> Plugin Descriptions</h2>
+        <p class="text-muted">Browse downloaded plugin descriptions with images and videos</p>
+    </div>
+</div>
+
+<div class="row mt-4">
+    <div class="col-12">
+        {% if apps %}
+        <div class="card">
+            <div class="card-header bg-dark text-white">
+                <h5 class="mb-0">
+                    <i class="bi bi-list"></i> Apps with Descriptions ({{ apps|length }})
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>App Name</th>
+                                <th>Addon Key</th>
+                                <th>Vendor</th>
+                                <th>Descriptions</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for item in apps %}
+                            <tr>
+                                <td>
+                                    <strong>{{ item.app.name }}</strong>
+                                </td>
+                                <td>
+                                    <code>{{ item.addon_key }}</code>
+                                </td>
+                                <td>{{ item.app.vendor }}</td>
+                                <td>
+                                    <span class="badge bg-info">{{ item.description_count }} file(s)</span>
+                                </td>
+                                <td>
+                                    {% if item.latest_description %}
+                                    <a href="{{ url_for('app_description', addon_key=item.addon_key, filename=item.latest_description) }}" 
+                                       target="_blank" class="btn btn-sm btn-primary">
+                                        <i class="bi bi-eye"></i> View Latest
+                                    </a>
+                                    <a href="{{ url_for('app_detail', addon_key=item.addon_key) }}" 
+                                       class="btn btn-sm btn-outline-secondary">
+                                        <i class="bi bi-info-circle"></i> App Details
+                                    </a>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        {% else %}
+        <div class="alert alert-info" role="alert">
+            <h5 class="alert-heading"><i class="bi bi-info-circle"></i> No Descriptions Yet</h5>
+            <p>No plugin descriptions have been downloaded yet.</p>
+            <hr>
+            <p class="mb-0">
+                <strong>To download descriptions:</strong><br>
+                1. Go to <a href="{{ url_for('manage') }}">Management</a> page<br>
+                2. Click "Start Description Download" in the "Download Descriptions" section<br>
+                3. Wait for the download to complete
+            </p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+{% endblock %}
+

@@ -50,6 +50,9 @@ class MarketplaceAPIv3:
         try:
             response = self.session.get(url, timeout=30)
             response.raise_for_status()
+            # Ensure UTF-8 encoding for response
+            if response.encoding is None or response.encoding.lower() not in ['utf-8', 'utf8']:
+                response.encoding = 'utf-8'
             return response.json()
         except Exception as e:
             logger.error(f"Failed to get appSoftwareIds for {addon_key}: {str(e)}")
@@ -72,6 +75,9 @@ class MarketplaceAPIv3:
         try:
             response = self.session.get(url, params=params, timeout=30)
             response.raise_for_status()
+            # Ensure UTF-8 encoding for response
+            if response.encoding is None or response.encoding.lower() not in ['utf-8', 'utf8']:
+                response.encoding = 'utf-8'
             return response.json()
         except Exception as e:
             logger.error(f"Failed to get versions for {app_software_id}: {str(e)}")
@@ -100,6 +106,9 @@ class MarketplaceAPIv3:
             try:
                 response = self.session.get(url, params=params, timeout=30)
                 response.raise_for_status()
+                # Ensure UTF-8 encoding for response
+                if response.encoding is None or response.encoding.lower() not in ['utf-8', 'utf8']:
+                    response.encoding = 'utf-8'
                 data = response.json()
 
                 versions = data.get('versions', [])
@@ -146,6 +155,9 @@ class MarketplaceAPIv3:
         try:
             response = self.session.get(url, timeout=30)
             response.raise_for_status()
+            # Ensure UTF-8 encoding for response
+            if response.encoding is None or response.encoding.lower() not in ['utf-8', 'utf8']:
+                response.encoding = 'utf-8'
             data = response.json()
 
             versions = data.get('versions', [])
@@ -181,6 +193,9 @@ class MarketplaceAPIv3:
         try:
             response = self.session.get(url, timeout=30)
             response.raise_for_status()
+            # Ensure UTF-8 encoding for response
+            if response.encoding is None or response.encoding.lower() not in ['utf-8', 'utf8']:
+                response.encoding = 'utf-8'
             version_data = response.json()
 
             # Save to database for future use

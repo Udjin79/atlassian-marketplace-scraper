@@ -41,7 +41,7 @@ class AppScraper:
         if products is None:
             products = PRODUCT_LIST
 
-        print(f"🔄 Starting app scraping for {len(products)} products: {', '.join(products)}")
+        print(f"[*] Starting app scraping for {len(products)} products: {', '.join(products)}")
         logger.info(f"Starting app scraping for products: {products}")
 
         # Try to resume from checkpoint
@@ -49,7 +49,7 @@ class AppScraper:
         if resume:
             state = load_checkpoint()
             if state:
-                print(f"📌 Resuming from checkpoint: {state.get('apps_processed', 0)} apps processed")
+                print(f"[*] Resuming from checkpoint: {state.get('apps_processed', 0)} apps processed")
                 logger.info(f"Resuming from checkpoint: {state}")
 
         if state is None:
@@ -72,10 +72,10 @@ class AppScraper:
                 state['app_offset'] = 0
                 state['last_product_index'] = product_idx
 
-            print(f"\n📦 Scraping {PRODUCTS[product]['name']} apps...")
+            print(f"\n[*] Scraping {PRODUCTS[product]['name']} apps...")
             apps_for_product = self.scrape_product_apps(product, state)
 
-            print(f"✅ Found {len(apps_for_product)} {product} apps")
+            print(f"[OK] Found {len(apps_for_product)} {product} apps")
             logger.info(f"Completed {product}: {len(apps_for_product)} apps")
 
             # Move to next product
@@ -83,14 +83,14 @@ class AppScraper:
 
         # Save all collected apps
         if state.get('apps_collected'):
-            print(f"\n💾 Saving {len(state['apps_collected'])} apps to metadata store...")
+            print(f"\n[*] Saving {len(state['apps_collected'])} apps to metadata store...")
             self.store.save_apps_batch(state['apps_collected'])
 
         # Clear checkpoint on successful completion
         clear_checkpoint()
 
         total = self.store.get_apps_count()
-        print(f"\n✅ Scraping complete! Total apps: {total}")
+        print(f"\n[OK] Scraping complete! Total apps: {total}")
         logger.info(f"App scraping completed. Total apps: {total}")
 
     def scrape_product_apps(self, product: str, state: dict) -> List[App]:
@@ -168,7 +168,7 @@ class AppScraper:
 
                 except Exception as e:
                     logger.error(f"Error scraping {product} at offset {offset}: {str(e)}")
-                    print(f"   ⚠️ Error at offset {offset}, continuing...")
+                    print(f"   [WARNING] Error at offset {offset}, continuing...")
                     offset += batch_size
                     state['app_offset'] = offset
                     continue
@@ -207,6 +207,6 @@ class AppScraper:
         """
         app = self.scrape_single_app(addon_key)
         if app:
-            print(f"✅ Updated app: {app.name} ({addon_key})")
+            print(f"[OK] Updated app: {app.name} ({addon_key})")
         else:
-            print(f"❌ Failed to update app: {addon_key}")
+            print(f"[ERROR] Failed to update app: {addon_key}")

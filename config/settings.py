@@ -14,6 +14,8 @@ METADATA_DIR = config('METADATA_DIR', default=os.path.join(DATA_DIR, 'metadata')
 BINARIES_DIR = config('BINARIES_DIR', default=os.path.join(DATA_DIR, 'binaries'))
 BINARIES_BASE_DIR = config('BINARIES_BASE_DIR', default=BINARIES_DIR)
 LOGS_DIR = config('LOGS_DIR', default=os.path.join(BASE_DIR, 'logs'))
+# Descriptions directory (can be set separately, defaults to METADATA_DIR/descriptions)
+DESCRIPTIONS_DIR = config('DESCRIPTIONS_DIR', default=os.path.join(METADATA_DIR, 'descriptions'))
 
 # Product-specific binary storage mapping
 # Maps products to different drives for distributed storage
@@ -59,10 +61,6 @@ FLASK_DEBUG = config('FLASK_DEBUG', default=True, cast=bool)
 FLASK_PORT = config('FLASK_PORT', default=5000, cast=int)
 SECRET_KEY = config('SECRET_KEY', default='dev-secret-key-change-in-production')
 
-# Management Page Authentication
-ADMIN_USERNAME = config('ADMIN_USERNAME', default='admin')
-ADMIN_PASSWORD = config('ADMIN_PASSWORD', default='admin')
-
 # Logging Settings
 LOG_LEVEL = config('LOG_LEVEL', default='INFO')
 
@@ -82,7 +80,7 @@ USE_SQLITE = config('USE_SQLITE', default=False, cast=bool)
 DATABASE_PATH = config('DATABASE_PATH', default=os.path.join(METADATA_DIR, 'marketplace.db'))
 
 # Ensure directories exist
-for directory in [METADATA_DIR, VERSIONS_DIR, CHECKPOINTS_DIR, BINARIES_DIR, LOGS_DIR]:
+for directory in [METADATA_DIR, VERSIONS_DIR, CHECKPOINTS_DIR, BINARIES_DIR, LOGS_DIR, DESCRIPTIONS_DIR]:
     os.makedirs(directory, exist_ok=True)
 
 # Ensure product-specific binary directories exist

@@ -59,6 +59,24 @@
                             <i class="bi bi-box-arrow-up-right"></i> View on Marketplace
                         </a>
                         {% endif %}
+
+                        {% if full_page_path or description_files %}
+                        <div class="mt-2">
+                            <strong>Downloaded Descriptions:</strong>
+                            {% if full_page_path %}
+                            <a href="{{ url_for('app_description', addon_key=app.addon_key, filename='full_page/index.html') }}" 
+                               target="_blank" class="btn btn-sm btn-success ms-2">
+                                <i class="bi bi-file-earmark-text"></i> Full Page (with assets)
+                            </a>
+                            {% endif %}
+                            {% for desc_file in description_files %}
+                            <a href="{{ url_for('app_description', addon_key=app.addon_key, filename=desc_file) }}" 
+                               target="_blank" class="btn btn-sm btn-info ms-2">
+                                <i class="bi bi-file-text"></i> {{ desc_file.replace('_', '.').replace('.html', '') }}
+                            </a>
+                            {% endfor %}
+                        </div>
+                        {% endif %}
                     </div>
                 </div>
             </div>
