@@ -55,7 +55,7 @@ def update_env_setting(key: str, value: str) -> bool:
     
     Args:
         key: Setting key
-        value: Setting value
+        value: Setting value (can be empty string)
         
     Returns:
         True if successful, False otherwise
@@ -76,7 +76,10 @@ def update_env_setting(key: str, value: str) -> bool:
         new_lines = []
         
         for line in lines:
-            if line.strip().startswith(f'{key}='):
+            # Check if line starts with key= (with optional whitespace)
+            stripped = line.strip()
+            if stripped.startswith(f'{key}='):
+                # Update the line
                 new_lines.append(f'{key}={value}\n')
                 updated = True
             else:
@@ -84,7 +87,7 @@ def update_env_setting(key: str, value: str) -> bool:
         
         # If not found, add at the end
         if not updated:
-            new_lines.append(f'\n{key}={value}\n')
+            new_lines.append(f'{key}={value}\n')
         
         # Write back
         with open(env_path, 'w', encoding='utf-8') as f:
@@ -96,4 +99,20 @@ def update_env_setting(key: str, value: str) -> bool:
     except Exception as e:
         logger.error(f"Error updating .env file: {str(e)}")
         return False
+
+
+def update_env_settings(settings_dict: Dict[str, str]) -> Dict[str, bool]:
+    """
+    Update multiple settings in .env file at once.
+    
+    Args:
+        settings_dict: Dictionary of setting keys and values
+        
+    Returns:
+        Dictionary mapping keys to success status (True/False)
+    """
+    results = {}
+    for key, value in settings_dict.items():
+        results[key] = update_env_setting(key, value)
+    return results
 

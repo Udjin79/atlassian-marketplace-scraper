@@ -46,10 +46,10 @@ class VersionScraper:
         apps = self.store.get_all_apps()
 
         if not apps:
-            print("❌ No apps found in metadata store. Run app scraper first.")
+            print("[ERROR] No apps found in metadata store. Run app scraper first.")
             return
 
-        print(f"🔄 Starting parallel version scraping for {len(apps)} apps ({max_workers} workers)...")
+        print(f"[*] Starting parallel version scraping for {len(apps)} apps ({max_workers} workers)...")
         logger.info(f"Starting parallel version scraping for {len(apps)} apps with {max_workers} workers")
 
         # Thread-safe counters
@@ -78,20 +78,20 @@ class VersionScraper:
                     with lock:
                         total_versions += len(versions)
                         completed_count += 1
-                        print(f"{completed_count}/{len(apps)} ✓ {app_name}: Found {len(versions)} versions → Saved (Total: {total_versions})")
+                        print(f"{completed_count}/{len(apps)} [OK] {app_name}: Found {len(versions)} versions -> Saved (Total: {total_versions})")
                     logger.info(f"Saved {len(versions)} versions for {addon_key}")
                     return ('success', addon_key, len(versions))
                 else:
                     with lock:
                         completed_count += 1
-                        print(f"{completed_count}/{len(apps)} ○ {app_name}: No versions found (after filtering)")
+                        print(f"{completed_count}/{len(apps)} [*] {app_name}: No versions found (after filtering)")
                     logger.debug(f"No versions found for {addon_key}")
                     return ('no_versions', addon_key, 0)
 
             except Exception as e:
                 with lock:
                     completed_count += 1
-                    print(f"{completed_count}/{len(apps)} ✗ {app_name}: Error - {str(e)}")
+                    print(f"{completed_count}/{len(apps)} [ERROR] {app_name}: Error - {str(e)}")
                 logger.error(f"Error scraping versions for {addon_key}: {str(e)}")
                 return ('error', addon_key, str(e))
 
@@ -107,12 +107,12 @@ class VersionScraper:
                 if status == 'error':
                     failed_apps.append(addon_key)
 
-        print(f"\n✅ Version scraping complete!")
+        print(f"\n[OK] Version scraping complete!")
         print(f"   Total versions collected: {total_versions}")
         print(f"   Average per app: {total_versions / len(apps):.1f}")
 
         if failed_apps:
-            print(f"   ⚠️ Failed apps: {len(failed_apps)}")
+            print(f"   [WARNING] Failed apps: {len(failed_apps)}")
             logger.warning(f"Failed to scrape versions for {len(failed_apps)} apps")
 
     def scrape_app_versions(self, addon_key: str,
@@ -223,15 +223,15 @@ class VersionScraper:
         Args:
             addon_key: The app's unique key
         """
-        print(f"🔄 Updating versions for {addon_key}...")
+        print(f"[*] Updating versions for {addon_key}...")
 
         versions = self.scrape_app_versions(addon_key)
 
         if versions:
             self.store.save_versions(addon_key, versions)
-            print(f"✅ Updated {len(versions)} versions for {addon_key}")
+            print(f"[OK] Updated {len(versions)} versions for {addon_key}")
         else:
-            print(f"⚠️ No versions found for {addon_key}")
+            print(f"[WARNING] No versions found for {addon_key}")
 
     def get_versions_summary(self):
         """Print summary of versions in metadata store."""
@@ -239,7 +239,7 @@ class VersionScraper:
         downloaded = self.store.get_downloaded_versions_count()
         pending = total_versions - downloaded
 
-        print(f"\n📊 Versions Summary:")
+        print(f"\n[STATS] Versions Summary:")
         print(f"   Total versions: {total_versions}")
         print(f"   Downloaded: {downloaded}")
         print(f"   Pending: {pending}")

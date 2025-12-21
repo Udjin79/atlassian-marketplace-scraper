@@ -2,6 +2,13 @@
 """CLI script to run the app scraper."""
 
 import sys
+import io
+
+# Fix encoding for Windows console
+if sys.platform == 'win32':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
 from scraper.app_scraper import AppScraper
 from scraper.marketplace_api import MarketplaceAPI
 from scraper.metadata_store import MetadataStore
@@ -15,7 +22,7 @@ def main():
 
     # Check for credentials
     if not settings.MARKETPLACE_USERNAME or not settings.MARKETPLACE_API_TOKEN:
-        print("❌ Error: Marketplace credentials not configured")
+        print("[ERROR] Marketplace credentials not configured")
         print("Please set MARKETPLACE_USERNAME and MARKETPLACE_API_TOKEN in .env file")
         print("See .env.example for template")
         return 1
@@ -43,28 +50,28 @@ def main():
             return 0
 
         elif command == '--resume':
-            print("📌 Resuming from checkpoint...")
+            print("[*] Resuming from checkpoint...")
             scraper.scrape_all_products(resume=True)
             return 0
 
     # Run scraper
     try:
         scraper.scrape_all_products(resume=True)
-        print("\n✅ App scraping completed successfully!")
-        print(f"\n📊 Total apps: {store.get_apps_count()}")
+        print("\n[OK] App scraping completed successfully!")
+        print(f"\n[*] Total apps: {store.get_apps_count()}")
         print()
-        print("📋 Next step:")
-        print("   → Run version scraper: python run_version_scraper.py")
+        print("[*] Next step:")
+        print("   -> Run version scraper: python run_version_scraper.py")
         return 0
 
     except KeyboardInterrupt:
-        print("\n\n⚠️ Scraping interrupted by user")
-        print("💾 Progress saved to checkpoint")
+        print("\n\n[WARNING] Scraping interrupted by user")
+        print("[*] Progress saved to checkpoint")
         print("   Run again with --resume to continue")
         return 1
 
     except Exception as e:
-        print(f"\n❌ Error: {str(e)}")
+        print(f"\n[ERROR] Error: {str(e)}")
         return 1
 
 

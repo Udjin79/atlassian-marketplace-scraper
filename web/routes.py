@@ -1,6 +1,7 @@
 """Flask routes for the web interface."""
 
 import os
+import re
 from flask import render_template, jsonify, request, send_file, redirect, url_for
 from config import settings
 from config.products import PRODUCTS, PRODUCT_LIST
@@ -9,7 +10,6 @@ from scraper.download_manager import DownloadManager
 from utils.logger import get_logger
 from utils.task_manager import get_task_manager
 from utils.settings_manager import read_env_settings, update_env_setting
-from utils.auth import requires_auth
 
 logger = get_logger('web')
 
@@ -107,14 +107,249 @@ def register_routes(app):
                 reverse=True
             )
 
+            # Check if description exists
+            description_dir = os.path.join(settings.DESCRIPTIONS_DIR, addon_key.replace('.', '_'))
+            description_files = []
+            full_page_path = None
+            
+            if os.path.exists(description_dir):
+                # Check for full page first
+                full_page_dir = os.path.join(description_dir, 'full_page')
+                if os.path.exists(full_page_dir):
+                    full_page_index = os.path.join(full_page_dir, 'index.html')
+                    if os.path.exists(full_page_index):
+                        full_page_path = 'full_page/index.html'
+                
+                # Also list API-based descriptions
+                for file in os.listdir(description_dir):
+                    if file.endswith('.html') and file != 'index.html':
+                        description_files.append(file)
+
             return render_template(
                 'app_detail.html',
                 app=app,
-                versions=versions
+                versions=versions,
+                description_files=description_files,
+                description_dir=description_dir,
+                full_page_path=full_page_path
             )
 
         except Exception as e:
             logger.error(f"Error loading app details for {addon_key}: {str(e)}")
+            return render_template('error.html', error=str(e)), 500
+
+    @app.route('/apps/<addon_key>/description/assets/<path:asset_path>')
+    def app_description_asset(addon_key, asset_path):
+        """Serve assets for description pages."""
+        try:
+            asset_file = os.path.join(
+                settings.DESCRIPTIONS_DIR,
+                addon_key.replace('.', '_'),
+                'full_page',
+                'assets',
+                asset_path
+            )
+            
+            if os.path.exists(asset_file) and os.path.isfile(asset_file):
+                return send_file(asset_file)
+            else:
+                return render_template('error.html', error="Asset not found"), 404
+        except Exception as e:
+            logger.error(f"Error serving asset {addon_key}/{asset_path}: {str(e)}")
+            return render_template('error.html', error=str(e)), 500
+
+    @app.route('/apps/<addon_key>/description/<path:filename>')
+    def app_description(addon_key, filename):
+        """Show downloaded description page."""
+        try:
+            # Handle full_page/index.html path
+            if filename.startswith('full_page/'):
+                filename = filename.replace('full_page/', '')
+                description_path = os.path.join(
+                    settings.DESCRIPTIONS_DIR,
+                    addon_key.replace('.', '_'),
+                    'full_page',
+                    filename
+                )
+            else:
+                # Security: sanitize filename
+                filename = os.path.basename(filename)
+                # Allow index.html for full page
+                if not filename.endswith('.html') and filename != 'index.html':
+                    return render_template('error.html', error="Invalid file type"), 400
+
+                description_path = os.path.join(
+                    settings.DESCRIPTIONS_DIR,
+                    addon_key.replace('.', '_'),
+                    filename
+                )
+                
+                # Also check full_page directory
+                if not os.path.exists(description_path):
+                    full_page_path = os.path.join(
+                        settings.DESCRIPTIONS_DIR,
+                        addon_key.replace('.', '_'),
+                        'full_page',
+                        filename
+                    )
+                    if os.path.exists(full_page_path):
+                        description_path = full_page_path
+                    else:
+                        return render_template('error.html', error="Description not found"), 404
+                elif filename == 'index.html':
+                    # Check if it's in full_page directory
+                    full_page_path = os.path.join(
+                        settings.DESCRIPTIONS_DIR,
+                        addon_key.replace('.', '_'),
+                        'full_page',
+                        'index.html'
+                    )
+                    if os.path.exists(full_page_path):
+                        description_path = full_page_path
+            
+            # Check if file exists
+            if not os.path.exists(description_path):
+                return render_template('error.html', error="Description not found"), 404
+
+            # For full page, serve assets as well
+            if 'full_page' in description_path:
+                # Check if it's an asset request
+                if filename != 'index.html':
+                    # Serve asset file
+                    return send_file(description_path)
+                
+                # Read and return HTML content
+                try:
+                    # Read as binary first to handle encoding issues
+                    with open(description_path, 'rb') as f:
+                        raw_bytes = f.read()
+                    
+                    # Try UTF-8 first
+                    try:
+                        html_content = raw_bytes.decode('utf-8')
+                    except UnicodeDecodeError:
+                        # If UTF-8 fails, try latin-1 and convert to UTF-8
+                        html_content = raw_bytes.decode('latin-1', errors='replace')
+                        # Re-encode to UTF-8
+                        html_content = html_content.encode('utf-8', errors='replace').decode('utf-8')
+                except Exception as e:
+                    logger.error(f"Error reading HTML file {description_path}: {str(e)}")
+                    return render_template('error.html', error=f"Error reading description: {str(e)}"), 500
+
+                # Ensure DOCTYPE is present (prevents Quirks Mode)
+                if not html_content.strip().startswith('<!DOCTYPE'):
+                    html_content = '<!DOCTYPE html>\n' + html_content
+
+                # Ensure charset meta tag exists
+                if '<meta charset' not in html_content.lower() and '<meta http-equiv="content-type"' not in html_content.lower():
+                    # Insert charset meta tag in head
+                    if '<head>' in html_content:
+                        html_content = html_content.replace('<head>', '<head>\n    <meta charset="UTF-8">')
+                    elif '<html' in html_content:
+                        # Insert after html tag
+                        html_content = re.sub(r'(<html[^>]*>)', r'\1\n<head>\n    <meta charset="UTF-8">\n</head>', html_content, count=1)
+
+                # Inject navigation back to app detail
+                nav_html = f'''
+                <div style="background: #fff; padding: 1rem; margin-bottom: 1rem; border-bottom: 2px solid #0f5ef7; position: sticky; top: 0; z-index: 1000;">
+                    <a href="/apps/{addon_key}" style="color: #0f5ef7; text-decoration: none; font-weight: bold;">
+                        ← Back to App Details
+                    </a>
+                </div>
+                '''
+
+                # Insert navigation after body tag
+                html_content = html_content.replace('<body>', '<body>' + nav_html)
+                
+                # Fix asset paths to use Flask routes
+                # Replace local asset paths with Flask routes
+                html_content = re.sub(
+                    r'(src|href)=["\']assets/([^"\']+)["\']',
+                    lambda m: f'{m.group(1)}="/apps/{addon_key}/description/assets/{m.group(2)}"',
+                    html_content
+                )
+                # Also handle relative paths
+                html_content = re.sub(
+                    r'(src|href)=["\'](?!https?://|/|#|javascript:|data:)([^"\']+)["\']',
+                    lambda m: f'{m.group(1)}="/apps/{addon_key}/description/assets/{m.group(2)}"',
+                    html_content
+                )
+
+                # Return with proper Content-Type header
+                from flask import Response
+                return Response(html_content, mimetype='text/html; charset=utf-8')
+            else:
+                # API-based description
+                try:
+                    with open(description_path, 'r', encoding='utf-8', errors='replace') as f:
+                        html_content = f.read()
+                except UnicodeDecodeError:
+                    # Try with different encoding if UTF-8 fails
+                    with open(description_path, 'r', encoding='latin-1', errors='replace') as f:
+                        html_content = f.read()
+                    # Convert to UTF-8
+                    html_content = html_content.encode('utf-8', errors='replace').decode('utf-8')
+
+                # Ensure charset meta tag exists
+                if '<meta charset' not in html_content.lower() and '<meta http-equiv="content-type"' not in html_content.lower():
+                    # Insert charset meta tag in head
+                    if '<head>' in html_content:
+                        html_content = html_content.replace('<head>', '<head>\n    <meta charset="UTF-8">')
+                    elif '<html' in html_content:
+                        # Insert after html tag
+                        html_content = re.sub(r'(<html[^>]*>)', r'\1\n<head>\n    <meta charset="UTF-8">\n</head>', html_content, count=1)
+
+                # Inject navigation back to app detail
+                nav_html = f'''
+                <div style="background: #fff; padding: 1rem; margin-bottom: 1rem; border-bottom: 2px solid #0f5ef7;">
+                    <a href="/apps/{addon_key}" style="color: #0f5ef7; text-decoration: none;">
+                        ← Back to App Details
+                    </a>
+                </div>
+                '''
+
+                # Insert navigation after body tag
+                html_content = html_content.replace('<body>', '<body>' + nav_html)
+
+                # Return with proper Content-Type header
+                from flask import Response
+                return Response(html_content, mimetype='text/html; charset=utf-8')
+
+        except Exception as e:
+            logger.error(f"Error loading description for {addon_key}/{filename}: {str(e)}")
+            return render_template('error.html', error=str(e)), 500
+
+    @app.route('/descriptions')
+    def descriptions_list():
+        """List all apps with descriptions."""
+        try:
+            descriptions_dir = settings.DESCRIPTIONS_DIR
+            apps_with_descriptions = []
+
+            if os.path.exists(descriptions_dir):
+                for item in os.listdir(descriptions_dir):
+                    item_path = os.path.join(descriptions_dir, item)
+                    if os.path.isdir(item_path):
+                        # Convert back from sanitized name
+                        addon_key = item.replace('_', '.')
+                        app = store.get_app_by_key(addon_key)
+                        if app:
+                            html_files = [f for f in os.listdir(item_path) if f.endswith('.html')]
+                            if html_files:
+                                apps_with_descriptions.append({
+                                    'app': app,
+                                    'addon_key': addon_key,
+                                    'description_count': len(html_files),
+                                    'latest_description': sorted(html_files)[-1] if html_files else None
+                                })
+
+            return render_template(
+                'descriptions_list.html',
+                apps=apps_with_descriptions
+            )
+
+        except Exception as e:
+            logger.error(f"Error loading descriptions list: {str(e)}")
             return render_template('error.html', error=str(e)), 500
 
     @app.route('/download/<product>/<addon_key>/<version_id>')
@@ -232,17 +467,18 @@ def register_routes(app):
         })
 
     # Management Routes
-
+    
     @app.route('/manage')
-    @requires_auth
     def manage():
         """Management page for tasks and settings."""
         try:
             task_mgr = get_task_manager()
             latest_tasks = {
+                'pipeline': task_mgr.get_latest_task('pipeline'),
                 'scrape_apps': task_mgr.get_latest_task('scrape_apps'),
                 'scrape_versions': task_mgr.get_latest_task('scrape_versions'),
-                'download': task_mgr.get_latest_task('download')
+                'download': task_mgr.get_latest_task('download'),
+                'download_descriptions': task_mgr.get_latest_task('download_descriptions')
             }
             
             # Get current settings (from .env if available, otherwise from settings)
@@ -256,10 +492,25 @@ def register_routes(app):
                 'MAX_RETRY_ATTEMPTS': env_settings.get('MAX_RETRY_ATTEMPTS', str(settings.MAX_RETRY_ATTEMPTS)),
             }
             
+            # Get storage paths
+            storage_paths = {
+                'METADATA_DIR': env_settings.get('METADATA_DIR', settings.METADATA_DIR),
+                'DATABASE_PATH': env_settings.get('DATABASE_PATH', settings.DATABASE_PATH),
+                'DESCRIPTIONS_DIR': env_settings.get('DESCRIPTIONS_DIR', settings.DESCRIPTIONS_DIR),
+                'LOGS_DIR': env_settings.get('LOGS_DIR', settings.LOGS_DIR),
+                'BINARIES_BASE_DIR': env_settings.get('BINARIES_BASE_DIR', settings.BINARIES_BASE_DIR),
+                'BINARIES_DIR_JIRA': env_settings.get('BINARIES_DIR_JIRA', settings.PRODUCT_STORAGE_MAP.get('jira', '')),
+                'BINARIES_DIR_CONFLUENCE': env_settings.get('BINARIES_DIR_CONFLUENCE', settings.PRODUCT_STORAGE_MAP.get('confluence', '')),
+                'BINARIES_DIR_BITBUCKET': env_settings.get('BINARIES_DIR_BITBUCKET', settings.PRODUCT_STORAGE_MAP.get('bitbucket', '')),
+                'BINARIES_DIR_BAMBOO': env_settings.get('BINARIES_DIR_BAMBOO', settings.PRODUCT_STORAGE_MAP.get('bamboo', '')),
+                'BINARIES_DIR_CROWD': env_settings.get('BINARIES_DIR_CROWD', settings.PRODUCT_STORAGE_MAP.get('crowd', '')),
+            }
+            
             return render_template(
                 'manage.html',
                 latest_tasks=latest_tasks,
                 current_settings=current_settings,
+                storage_paths=storage_paths,
                 products=PRODUCT_LIST
             )
         except Exception as e:
@@ -267,7 +518,6 @@ def register_routes(app):
             return render_template('error.html', error=str(e)), 500
 
     @app.route('/api/tasks/start/scrape-apps', methods=['POST'])
-    @requires_auth
     def api_start_scrape_apps():
         """Start app scraping task."""
         try:
@@ -287,7 +537,6 @@ def register_routes(app):
             return jsonify({'success': False, 'error': str(e)}), 500
 
     @app.route('/api/tasks/start/scrape-versions', methods=['POST'])
-    @requires_auth
     def api_start_scrape_versions():
         """Start version scraping task."""
         try:
@@ -304,7 +553,6 @@ def register_routes(app):
             return jsonify({'success': False, 'error': str(e)}), 500
 
     @app.route('/api/tasks/start/download', methods=['POST'])
-    @requires_auth
     def api_start_download():
         """Start binary download task."""
         try:
@@ -323,8 +571,52 @@ def register_routes(app):
             logger.error(f"Error starting download: {str(e)}")
             return jsonify({'success': False, 'error': str(e)}), 500
 
+    @app.route('/api/tasks/start/download-descriptions', methods=['POST'])
+    def api_start_download_descriptions():
+        """Start description download task."""
+        try:
+            data = request.get_json() or {}
+            addon_key = data.get('addon_key')
+            download_media = data.get('download_media', True)
+            
+            task_mgr = get_task_manager()
+            task_id = task_mgr.start_download_descriptions(addon_key=addon_key, download_media=download_media)
+            
+            return jsonify({
+                'success': True,
+                'task_id': task_id,
+                'message': 'Description download started'
+            })
+        except Exception as e:
+            logger.error(f"Error starting description download: {str(e)}")
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    @app.route('/api/tasks/start/pipeline', methods=['POST'])
+    def api_start_pipeline():
+        """Start full pipeline: scrape apps → versions → binaries → descriptions."""
+        try:
+            data = request.get_json() or {}
+            resume_scrape = data.get('resume_scrape', False)
+            download_product = data.get('download_product')
+            download_media = data.get('download_media', True)
+            
+            task_mgr = get_task_manager()
+            task_id = task_mgr.start_full_pipeline(
+                resume_scrape=resume_scrape,
+                download_product=download_product,
+                download_media=download_media
+            )
+            
+            return jsonify({
+                'success': True,
+                'task_id': task_id,
+                'message': 'Full pipeline started - all tasks will run sequentially'
+            })
+        except Exception as e:
+            logger.error(f"Error starting pipeline: {str(e)}")
+            return jsonify({'success': False, 'error': str(e)}), 500
+
     @app.route('/api/tasks/<task_id>')
-    @requires_auth
     def api_task_status(task_id):
         """Get task status."""
         try:
@@ -343,7 +635,6 @@ def register_routes(app):
             return jsonify({'success': False, 'error': str(e)}), 500
 
     @app.route('/api/tasks')
-    @requires_auth
     def api_all_tasks():
         """Get all tasks."""
         try:
@@ -359,7 +650,6 @@ def register_routes(app):
             return jsonify({'success': False, 'error': str(e)}), 500
 
     @app.route('/api/settings', methods=['GET'])
-    @requires_auth
     def api_get_settings():
         """Get current settings."""
         try:
@@ -381,7 +671,6 @@ def register_routes(app):
             return jsonify({'success': False, 'error': str(e)}), 500
 
     @app.route('/api/settings', methods=['POST'])
-    @requires_auth
     def api_update_settings():
         """Update settings in .env file."""
         try:
@@ -440,6 +729,94 @@ def register_routes(app):
             })
         except Exception as e:
             logger.error(f"Error updating settings: {str(e)}")
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    @app.route('/api/storage-paths', methods=['GET'])
+    def api_get_storage_paths():
+        """Get current storage paths."""
+        try:
+            env_settings = read_env_settings()
+            paths = {
+                'METADATA_DIR': env_settings.get('METADATA_DIR', settings.METADATA_DIR),
+                'DATABASE_PATH': env_settings.get('DATABASE_PATH', settings.DATABASE_PATH),
+                'DESCRIPTIONS_DIR': env_settings.get('DESCRIPTIONS_DIR', settings.DESCRIPTIONS_DIR),
+                'LOGS_DIR': env_settings.get('LOGS_DIR', settings.LOGS_DIR),
+                'BINARIES_BASE_DIR': env_settings.get('BINARIES_BASE_DIR', settings.BINARIES_BASE_DIR),
+                'BINARIES_DIR_JIRA': env_settings.get('BINARIES_DIR_JIRA', settings.PRODUCT_STORAGE_MAP.get('jira', '')),
+                'BINARIES_DIR_CONFLUENCE': env_settings.get('BINARIES_DIR_CONFLUENCE', settings.PRODUCT_STORAGE_MAP.get('confluence', '')),
+                'BINARIES_DIR_BITBUCKET': env_settings.get('BINARIES_DIR_BITBUCKET', settings.PRODUCT_STORAGE_MAP.get('bitbucket', '')),
+                'BINARIES_DIR_BAMBOO': env_settings.get('BINARIES_DIR_BAMBOO', settings.PRODUCT_STORAGE_MAP.get('bamboo', '')),
+                'BINARIES_DIR_CROWD': env_settings.get('BINARIES_DIR_CROWD', settings.PRODUCT_STORAGE_MAP.get('crowd', '')),
+            }
+            
+            return jsonify({
+                'success': True,
+                'paths': paths
+            })
+        except Exception as e:
+            logger.error(f"Error getting storage paths: {str(e)}")
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    @app.route('/api/storage-paths', methods=['POST'])
+    def api_update_storage_paths():
+        """Update storage paths in .env file."""
+        try:
+            data = request.get_json()
+            if not data:
+                return jsonify({'success': False, 'error': 'No data provided'}), 400
+            
+            # Allowed path settings
+            allowed_paths = [
+                'METADATA_DIR',
+                'DATABASE_PATH',
+                'DESCRIPTIONS_DIR',
+                'LOGS_DIR',
+                'BINARIES_BASE_DIR',
+                'BINARIES_DIR_JIRA',
+                'BINARIES_DIR_CONFLUENCE',
+                'BINARIES_DIR_BITBUCKET',
+                'BINARIES_DIR_BAMBOO',
+                'BINARIES_DIR_CROWD',
+            ]
+            
+            updated = []
+            errors = []
+            
+            for key, value in data.items():
+                if key not in allowed_paths:
+                    errors.append(f"Path '{key}' is not allowed to be updated")
+                    continue
+                
+                # Validate path (basic check - should be a string)
+                if not isinstance(value, str):
+                    errors.append(f"Invalid path for '{key}': must be a string")
+                    continue
+                
+                # Normalize path (remove trailing slashes, normalize separators)
+                # Empty paths are allowed (will use defaults)
+                normalized_path = os.path.normpath(value.strip()) if value.strip() else ''
+                
+                # Update setting
+                if update_env_setting(key, normalized_path):
+                    updated.append(key)
+                else:
+                    errors.append(f"Failed to update '{key}'")
+            
+            if errors:
+                return jsonify({
+                    'success': False,
+                    'errors': errors,
+                    'updated': updated
+                }), 400
+            
+            return jsonify({
+                'success': True,
+                'message': f'Updated {len(updated)} path(s). Restart the application to apply changes.',
+                'updated': updated,
+                'note': 'You need to restart the Flask application for changes to take effect.'
+            })
+        except Exception as e:
+            logger.error(f"Error updating storage paths: {str(e)}")
             return jsonify({'success': False, 'error': str(e)}), 500
 
     @app.errorhandler(404)

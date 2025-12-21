@@ -57,6 +57,9 @@ class MarketplaceAPI:
             self.rate_limiter.adaptive_delay(response.status_code)
 
             response.raise_for_status()
+            # Ensure UTF-8 encoding for response
+            if response.encoding is None or response.encoding.lower() not in ['utf-8', 'utf8']:
+                response.encoding = 'utf-8'
             return response.json()
 
         except requests.exceptions.HTTPError as e:

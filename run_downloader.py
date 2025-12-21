@@ -2,6 +2,13 @@
 """CLI script to run the download manager."""
 
 import sys
+import io
+
+# Fix encoding for Windows console
+if sys.platform == 'win32':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
 from scraper.download_manager import DownloadManager
 from scraper.marketplace_api import MarketplaceAPI
 from scraper.metadata_store import MetadataStore

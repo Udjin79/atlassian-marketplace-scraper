@@ -66,6 +66,13 @@ class TaskManager:
                 venv_python = os.path.join(base_dir, 'venv', 'Scripts', 'python.exe')
                 if os.path.exists(venv_python):
                     python_exe = venv_python
+                    logger.info(f"Using venv Python: {python_exe}")
+                else:
+                    logger.info(f"Using system Python: {python_exe}")
+                
+                # Verify script exists
+                if not os.path.exists(script_path):
+                    raise FileNotFoundError(f"Script not found: {script_path}")
                 
                 # Build command
                 cmd = [python_exe, script_path]
@@ -73,15 +80,27 @@ class TaskManager:
                     cmd.extend(args)
                 
                 logger.info(f"Starting task {task_id}: {' '.join(cmd)}")
+                logger.info(f"Working directory: {base_dir}")
+                
+                # Prepare environment
+                env = os.environ.copy()
+                # Ensure Python path includes the project directory
+                pythonpath = env.get('PYTHONPATH', '')
+                if pythonpath:
+                    env['PYTHONPATH'] = f"{base_dir};{pythonpath}" if os.name == 'nt' else f"{base_dir}:{pythonpath}"
+                else:
+                    env['PYTHONPATH'] = base_dir
                 
                 # Run process
                 process = subprocess.Popen(
                     cmd,
                     cwd=base_dir,
                     stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,  # Combine stderr into stdout for easier reading
                     text=True,
-                    bufsize=1
+                    bufsize=1,
+                    env=env,
+                    shell=False
                 )
                 
                 # Update status
@@ -91,7 +110,7 @@ class TaskManager:
                     self._save_status()
                 
                 # Wait for completion
-                stdout, stderr = process.communicate()
+                stdout, _ = process.communicate()  # stderr is combined with stdout
                 
                 # Update final status
                 with self.lock:
@@ -101,8 +120,35 @@ class TaskManager:
                     else:
                         self.tasks[task_id]['status'] = 'failed'
                         self.tasks[task_id]['message'] = f'Failed with code {process.returncode}'
-                        if stderr:
-                            self.tasks[task_id]['error'] = stderr[:500]  # Limit error message
+                        
+                        # Save full output (last 3000 chars) - includes both stdout and stderr
+                        error_output = ""
+                        if stdout:
+                            error_output = stdout[-3000:] if len(stdout) > 3000 else stdout
+                        
+                        if error_output:
+                            self.tasks[task_id]['error'] = error_output
+                            # Try to extract key error message
+                            error_lines = error_output.split('\n')
+                            for line in reversed(error_lines):
+                                line_stripped = line.strip()
+                                if line_stripped and (
+                                    'error' in line_stripped.lower() or 
+                                    '❌' in line_stripped or 
+                                    'failed' in line_stripped.lower() or
+                                    'exception' in line_stripped.lower() or
+                                    'traceback' in line_stripped.lower()
+                                ):
+                                    # Extract meaningful error message
+                                    if len(line_stripped) > 200:
+                                        self.tasks[task_id]['message'] = line_stripped[:197] + '...'
+                                    else:
+                                        self.tasks[task_id]['message'] = line_stripped
+                                    break
+                    
+                    # Save full output for debugging (last 2000 chars)
+                    if stdout:
+                        self.tasks[task_id]['output'] = stdout[-2000:] if len(stdout) > 2000 else stdout
                     
                     self.tasks[task_id]['finished_at'] = datetime.now().isoformat()
                     self.tasks[task_id]['return_code'] = process.returncode
@@ -110,6 +156,9 @@ class TaskManager:
                     self._save_status()
                 
                 logger.info(f"Task {task_id} finished with code {process.returncode}")
+                if process.returncode != 0:
+                    error_preview = stdout[-500:] if stdout and len(stdout) > 500 else (stdout if stdout else 'No output')
+                    logger.error(f"Task {task_id} error output: {error_preview}")
                 
             except Exception as e:
                 with self.lock:
@@ -143,6 +192,169 @@ class TaskManager:
         args = [product] if product else []
         self._run_task(task_id, 'run_downloader.py', args)
         return task_id
+
+    def start_download_descriptions(self, addon_key: Optional[str] = None, download_media: bool = True) -> str:
+        """Start description download task."""
+        task_id = f"download_descriptions_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        args = []
+        if addon_key:
+            args.extend(['--addon-key', addon_key])
+        if not download_media:
+            args.append('--no-media')
+        self._run_task(task_id, 'run_description_downloader.py', args)
+        return task_id
+
+    def start_full_pipeline(
+        self,
+        resume_scrape: bool = False,
+        download_product: Optional[str] = None,
+        download_media: bool = True
+    ) -> str:
+        """
+        Start all tasks sequentially: scrape apps → scrape versions → download binaries → download descriptions.
+        
+        Args:
+            resume_scrape: Resume app scraping from checkpoint
+            download_product: Optional product filter for binary download
+            download_media: Download media files for descriptions
+            
+        Returns:
+            Pipeline task ID
+        """
+        import time
+        
+        pipeline_id = f"pipeline_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        
+        def run_pipeline():
+            """Run all tasks sequentially."""
+            steps = []
+            
+            try:
+                # Step 1: Scrape Apps
+                logger.info(f"[Pipeline {pipeline_id}] Starting step 1: Scrape Apps")
+                with self.lock:
+                    self.tasks[pipeline_id] = {
+                        'status': 'running',
+                        'started_at': datetime.now().isoformat(),
+                        'script': 'pipeline',
+                        'progress': 0,
+                        'message': 'Step 1/4: Scraping apps...',
+                        'current_step': 1,
+                        'total_steps': 4,
+                        'steps': []
+                    }
+                    self._save_status()
+                
+                task_id_1 = self.start_scrape_apps(resume=resume_scrape)
+                steps.append({'name': 'Scrape Apps', 'task_id': task_id_1, 'status': 'running'})
+                
+                # Wait for completion
+                while True:
+                    time.sleep(5)
+                    status = self.get_task_status(task_id_1)
+                    if not status:
+                        break
+                    if status.get('status') in ['completed', 'failed']:
+                        steps[-1]['status'] = status.get('status')
+                        if status.get('status') == 'failed':
+                            raise Exception(f"Step 1 (Scrape Apps) failed: {status.get('message', 'Unknown error')}")
+                        break
+                
+                # Step 2: Scrape Versions
+                logger.info(f"[Pipeline {pipeline_id}] Starting step 2: Scrape Versions")
+                with self.lock:
+                    self.tasks[pipeline_id]['progress'] = 25
+                    self.tasks[pipeline_id]['message'] = 'Step 2/4: Scraping versions...'
+                    self.tasks[pipeline_id]['current_step'] = 2
+                    self._save_status()
+                
+                task_id_2 = self.start_scrape_versions()
+                steps.append({'name': 'Scrape Versions', 'task_id': task_id_2, 'status': 'running'})
+                
+                # Wait for completion
+                while True:
+                    time.sleep(5)
+                    status = self.get_task_status(task_id_2)
+                    if not status:
+                        break
+                    if status.get('status') in ['completed', 'failed']:
+                        steps[-1]['status'] = status.get('status')
+                        if status.get('status') == 'failed':
+                            raise Exception(f"Step 2 (Scrape Versions) failed: {status.get('message', 'Unknown error')}")
+                        break
+                
+                # Step 3: Download Binaries
+                logger.info(f"[Pipeline {pipeline_id}] Starting step 3: Download Binaries")
+                with self.lock:
+                    self.tasks[pipeline_id]['progress'] = 50
+                    self.tasks[pipeline_id]['message'] = 'Step 3/4: Downloading binaries...'
+                    self.tasks[pipeline_id]['current_step'] = 3
+                    self._save_status()
+                
+                task_id_3 = self.start_download_binaries(product=download_product)
+                steps.append({'name': 'Download Binaries', 'task_id': task_id_3, 'status': 'running'})
+                
+                # Wait for completion
+                while True:
+                    time.sleep(5)
+                    status = self.get_task_status(task_id_3)
+                    if not status:
+                        break
+                    if status.get('status') in ['completed', 'failed']:
+                        steps[-1]['status'] = status.get('status')
+                        if status.get('status') == 'failed':
+                            raise Exception(f"Step 3 (Download Binaries) failed: {status.get('message', 'Unknown error')}")
+                        break
+                
+                # Step 4: Download Descriptions
+                logger.info(f"[Pipeline {pipeline_id}] Starting step 4: Download Descriptions")
+                with self.lock:
+                    self.tasks[pipeline_id]['progress'] = 75
+                    self.tasks[pipeline_id]['message'] = 'Step 4/4: Downloading descriptions...'
+                    self.tasks[pipeline_id]['current_step'] = 4
+                    self._save_status()
+                
+                task_id_4 = self.start_download_descriptions(download_media=download_media)
+                steps.append({'name': 'Download Descriptions', 'task_id': task_id_4, 'status': 'running'})
+                
+                # Wait for completion
+                while True:
+                    time.sleep(5)
+                    status = self.get_task_status(task_id_4)
+                    if not status:
+                        break
+                    if status.get('status') in ['completed', 'failed']:
+                        steps[-1]['status'] = status.get('status')
+                        if status.get('status') == 'failed':
+                            raise Exception(f"Step 4 (Download Descriptions) failed: {status.get('message', 'Unknown error')}")
+                        break
+                
+                # All steps completed
+                with self.lock:
+                    self.tasks[pipeline_id]['status'] = 'completed'
+                    self.tasks[pipeline_id]['progress'] = 100
+                    self.tasks[pipeline_id]['message'] = 'All steps completed successfully!'
+                    self.tasks[pipeline_id]['finished_at'] = datetime.now().isoformat()
+                    self.tasks[pipeline_id]['steps'] = steps
+                    self._save_status()
+                
+                logger.info(f"[Pipeline {pipeline_id}] All steps completed successfully")
+                
+            except Exception as e:
+                with self.lock:
+                    self.tasks[pipeline_id]['status'] = 'failed'
+                    self.tasks[pipeline_id]['message'] = f'Pipeline failed: {str(e)}'
+                    self.tasks[pipeline_id]['finished_at'] = datetime.now().isoformat()
+                    self.tasks[pipeline_id]['steps'] = steps
+                    self.tasks[pipeline_id]['error'] = str(e)
+                    self._save_status()
+                logger.error(f"[Pipeline {pipeline_id}] Failed: {str(e)}")
+        
+        # Run pipeline in background thread
+        thread = threading.Thread(target=run_pipeline, daemon=True)
+        thread.start()
+        
+        return pipeline_id
     
     def get_task_status(self, task_id: str) -> Optional[Dict]:
         """Get status of a task."""

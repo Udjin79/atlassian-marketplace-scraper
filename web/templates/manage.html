@@ -18,6 +18,62 @@
                 <h5 class="mb-0"><i class="bi bi-play-circle"></i> Task Control</h5>
             </div>
             <div class="card-body">
+                <!-- Full Pipeline -->
+                <div class="mb-4 p-4 border rounded bg-light">
+                    <h5 class="mb-3">
+                        <i class="bi bi-play-circle-fill text-primary"></i> 
+                        Full Pipeline (Run All Tasks Sequentially)
+                    </h5>
+                    <p class="text-muted">
+                        <strong>One-click automation:</strong> Run all tasks in sequence (Scrape Apps → Versions → Binaries → Descriptions).
+                        Perfect for overnight runs - start it and go to sleep!
+                    </p>
+                    <div class="row mb-3">
+                        <div class="col-md-4">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="pipeline-resume-scrape">
+                                <label class="form-check-label" for="pipeline-resume-scrape">
+                                    Resume app scraping from checkpoint
+                                </label>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <label for="pipeline-download-product" class="form-label">Product filter (optional):</label>
+                            <select id="pipeline-download-product" class="form-select form-select-sm">
+                                <option value="">All Products</option>
+                                {% for product in products %}
+                                <option value="{{ product }}">{{ product|title }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="form-check mt-3">
+                                <input class="form-check-input" type="checkbox" id="pipeline-download-media" checked>
+                                <label class="form-check-label" for="pipeline-download-media">
+                                    Download media files (images/videos)
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                    <button id="btn-pipeline" class="btn btn-lg btn-primary" onclick="startPipeline()">
+                        <i class="bi bi-rocket-takeoff"></i> Start Full Pipeline
+                    </button>
+                    <div id="status-pipeline" class="mt-3"></div>
+                    <div id="pipeline-progress" class="mt-3" style="display: none;">
+                        <div class="progress" style="height: 30px;">
+                            <div id="pipeline-progress-bar" class="progress-bar progress-bar-striped progress-bar-animated" 
+                                 role="progressbar" style="width: 0%">
+                                <span id="pipeline-progress-text">0%</span>
+                            </div>
+                        </div>
+                        <div id="pipeline-steps" class="mt-2 small"></div>
+                    </div>
+                </div>
+
+                <hr class="my-4">
+
+                <h6 class="text-muted mb-3">Individual Tasks:</h6>
+
                 <!-- Scrape Apps Task -->
                 <div class="mb-4 p-3 border rounded">
                     <h6><i class="bi bi-collection"></i> 1. Scrape Apps</h6>
@@ -61,6 +117,148 @@
                     </button>
                     <div id="status-download" class="mt-2"></div>
                 </div>
+
+                <!-- Download Descriptions Task -->
+                <div class="mb-4 p-3 border rounded">
+                    <h6><i class="bi bi-file-text"></i> 4. Download Descriptions</h6>
+                    <p class="text-muted small">Download plugin descriptions with images and videos from Marketplace pages</p>
+                    <div class="mb-2">
+                        <label for="description-addon-key" class="form-label">Addon Key (optional, leave empty for all):</label>
+                        <input type="text" id="description-addon-key" class="form-control form-control-sm" style="max-width: 300px;" placeholder="com.example.plugin">
+                    </div>
+                    <div class="mb-2">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="description-download-media" checked>
+                            <label class="form-check-label" for="description-download-media">
+                                Download media files (images/videos)
+                            </label>
+                        </div>
+                    </div>
+                    <button id="btn-download-descriptions" class="btn btn-info" onclick="startDownloadDescriptions()">
+                        <i class="bi bi-play-fill"></i> Start Description Download
+                    </button>
+                    <div id="status-download-descriptions" class="mt-2"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Storage Paths Section -->
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header bg-info text-white">
+                <h5 class="mb-0"><i class="bi bi-folder"></i> Storage Paths</h5>
+            </div>
+            <div class="card-body">
+                <div class="alert alert-info">
+                    <i class="bi bi-info-circle"></i> 
+                    <strong>Note:</strong> Configure where files are stored. You can specify different drives for different types of data.
+                    Changes require application restart to take effect.
+                </div>
+                
+                <form id="storage-paths-form">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <h6 class="text-primary mb-3"><i class="bi bi-database"></i> Metadata & Database</h6>
+                            
+                            <div class="mb-3">
+                                <label for="metadata_dir" class="form-label">Metadata Directory</label>
+                                <input type="text" class="form-control" id="metadata_dir" 
+                                       value="{{ storage_paths.METADATA_DIR }}" 
+                                       placeholder="I:\marketplace\metadata">
+                                <small class="text-muted">Where metadata (apps.json, versions) are stored</small>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label for="database_path" class="form-label">Database Path</label>
+                                <input type="text" class="form-control" id="database_path" 
+                                       value="{{ storage_paths.DATABASE_PATH }}" 
+                                       placeholder="I:\marketplace\marketplace.db">
+                                <small class="text-muted">SQLite database file location</small>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label for="descriptions_dir" class="form-label">Descriptions Directory</label>
+                                <input type="text" class="form-control" id="descriptions_dir" 
+                                       value="{{ storage_paths.DESCRIPTIONS_DIR }}" 
+                                       placeholder="K:\marketplace-descriptions">
+                                <small class="text-muted">Where plugin descriptions (HTML, images, videos) are stored</small>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label for="logs_dir" class="form-label">Logs Directory</label>
+                                <input type="text" class="form-control" id="logs_dir" 
+                                       value="{{ storage_paths.LOGS_DIR }}" 
+                                       placeholder="I:\marketplace\logs">
+                                <small class="text-muted">Where log files are stored</small>
+                            </div>
+                        </div>
+                        
+                        <div class="col-md-6">
+                            <h6 class="text-success mb-3"><i class="bi bi-hdd"></i> Binary Files (by Product)</h6>
+                            
+                            <div class="mb-3">
+                                <label for="binaries_base_dir" class="form-label">Base Binaries Directory</label>
+                                <input type="text" class="form-control" id="binaries_base_dir" 
+                                       value="{{ storage_paths.BINARIES_BASE_DIR }}" 
+                                       placeholder="H:\marketplace-binaries">
+                                <small class="text-muted">Default directory for binaries (used as fallback)</small>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label for="binaries_dir_jira" class="form-label">Jira Binaries</label>
+                                <input type="text" class="form-control" id="binaries_dir_jira" 
+                                       value="{{ storage_paths.BINARIES_DIR_JIRA }}" 
+                                       placeholder="H:\marketplace-binaries\jira">
+                                <small class="text-muted">Jira plugin binaries (JAR files)</small>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label for="binaries_dir_confluence" class="form-label">Confluence Binaries</label>
+                                <input type="text" class="form-control" id="binaries_dir_confluence" 
+                                       value="{{ storage_paths.BINARIES_DIR_CONFLUENCE }}" 
+                                       placeholder="K:\marketplace-binaries\confluence">
+                                <small class="text-muted">Confluence plugin binaries</small>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label for="binaries_dir_bitbucket" class="form-label">Bitbucket Binaries</label>
+                                <input type="text" class="form-control" id="binaries_dir_bitbucket" 
+                                       value="{{ storage_paths.BINARIES_DIR_BITBUCKET }}" 
+                                       placeholder="V:\marketplace-binaries\bitbucket">
+                                <small class="text-muted">Bitbucket plugin binaries</small>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label for="binaries_dir_bamboo" class="form-label">Bamboo Binaries</label>
+                                <input type="text" class="form-control" id="binaries_dir_bamboo" 
+                                       value="{{ storage_paths.BINARIES_DIR_BAMBOO }}" 
+                                       placeholder="W:\marketplace-binaries\bamboo">
+                                <small class="text-muted">Bamboo plugin binaries</small>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label for="binaries_dir_crowd" class="form-label">Crowd Binaries</label>
+                                <input type="text" class="form-control" id="binaries_dir_crowd" 
+                                       value="{{ storage_paths.BINARIES_DIR_CROWD }}" 
+                                       placeholder="F:\marketplace-binaries\crowd">
+                                <small class="text-muted">Crowd plugin binaries</small>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="d-flex gap-2 mt-3">
+                        <button type="button" class="btn btn-primary" onclick="saveStoragePaths()">
+                            <i class="bi bi-save"></i> Save Storage Paths
+                        </button>
+                        <button type="button" class="btn btn-secondary" onclick="loadStoragePaths()">
+                            <i class="bi bi-arrow-clockwise"></i> Reload
+                        </button>
+                    </div>
+                    <div id="storage-paths-message" class="mt-2"></div>
+                </form>
             </div>
         </div>
     </div>
@@ -252,6 +450,39 @@ function startDownload() {
     });
 }
 
+function startDownloadDescriptions() {
+    const btn = document.getElementById('btn-download-descriptions');
+    const statusDiv = document.getElementById('status-download-descriptions');
+    const addonKey = document.getElementById('description-addon-key').value.trim();
+    const downloadMedia = document.getElementById('description-download-media').checked;
+    
+    btn.disabled = true;
+    statusDiv.innerHTML = '<div class="spinner-border spinner-border-sm me-2"></div>Starting...';
+    
+    fetch('/api/tasks/start/download-descriptions', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            addon_key: addonKey || null,
+            download_media: downloadMedia
+        })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            statusDiv.innerHTML = `<div class="alert alert-success"><i class="bi bi-check-circle"></i> Task started: ${data.task_id}</div>`;
+            setTimeout(() => refreshTaskStatus(), 2000);
+        } else {
+            statusDiv.innerHTML = `<div class="alert alert-danger">Error: ${data.error}</div>`;
+            btn.disabled = false;
+        }
+    })
+    .catch(e => {
+        statusDiv.innerHTML = `<div class="alert alert-danger">Error: ${e.message}</div>`;
+        btn.disabled = false;
+    });
+}
+
 function refreshTaskStatus() {
     const container = document.getElementById('task-status-container');
     container.innerHTML = '<div class="spinner-border spinner-border-sm me-2"></div>Loading...';
@@ -273,12 +504,24 @@ function refreshTaskStatus() {
                     'failed': 'danger'
                 }[task.status] || 'secondary';
                 
+                let messageCell = task.message || 'N/A';
+                if (task.status === 'failed' && task.error) {
+                    const errorPreview = task.error.length > 100 ? task.error.substring(0, 100) + '...' : task.error;
+                    messageCell = `<div>
+                        <strong>${task.message || 'Failed'}</strong>
+                        <br><small class="text-muted">${escapeHtml(errorPreview)}</small>
+                        <button class="btn btn-sm btn-outline-danger ms-2" onclick="showTaskError('${taskId}')">
+                            <i class="bi bi-exclamation-triangle"></i> Details
+                        </button>
+                    </div>`;
+                }
+                
                 html += `<tr>
                     <td><code>${taskId}</code></td>
                     <td>${task.script || 'N/A'}</td>
                     <td><span class="badge bg-${statusClass}">${task.status || 'unknown'}</span></td>
                     <td>${task.started_at ? new Date(task.started_at).toLocaleString() : 'N/A'}</td>
-                    <td>${task.message || 'N/A'}</td>
+                    <td>${messageCell}</td>
                 </tr>`;
             });
             
@@ -325,12 +568,247 @@ function saveSettings() {
     });
 }
 
+function startPipeline() {
+    const btn = document.getElementById('btn-pipeline');
+    const statusDiv = document.getElementById('status-pipeline');
+    const progressDiv = document.getElementById('pipeline-progress');
+    const progressBar = document.getElementById('pipeline-progress-bar');
+    const progressText = document.getElementById('pipeline-progress-text');
+    const stepsDiv = document.getElementById('pipeline-steps');
+    
+    const resumeScrape = document.getElementById('pipeline-resume-scrape').checked;
+    const downloadProduct = document.getElementById('pipeline-download-product').value;
+    const downloadMedia = document.getElementById('pipeline-download-media').checked;
+    
+    btn.disabled = true;
+    statusDiv.innerHTML = '<div class="alert alert-info"><i class="bi bi-hourglass-split"></i> Starting pipeline...</div>';
+    progressDiv.style.display = 'block';
+    progressBar.style.width = '0%';
+    progressText.textContent = '0% - Starting...';
+    stepsDiv.innerHTML = '';
+    
+    fetch('/api/tasks/start/pipeline', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            resume_scrape: resumeScrape,
+            download_product: downloadProduct || null,
+            download_media: downloadMedia
+        })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            statusDiv.innerHTML = `<div class="alert alert-success"><i class="bi bi-check-circle"></i> Pipeline started: ${data.task_id}</div>`;
+            
+            // Start polling for progress
+            let pollInterval = setInterval(() => {
+                fetch(`/api/tasks/${data.task_id}`)
+                .then(r => r.json())
+                .then(statusData => {
+                    if (statusData.success && statusData.task) {
+                        const task = statusData.task;
+                        const progress = task.progress || 0;
+                        const currentStep = task.current_step || 0;
+                        const totalSteps = task.total_steps || 4;
+                        
+                        progressBar.style.width = progress + '%';
+                        progressText.textContent = `${progress}% - ${task.message || 'Running...'}`;
+                        
+                        // Update steps
+                        if (task.steps && task.steps.length > 0) {
+                            let stepsHtml = '<strong>Steps:</strong><ul class="mb-0">';
+                            task.steps.forEach((step, idx) => {
+                                const statusIcon = step.status === 'completed' ? '✅' : 
+                                                  step.status === 'failed' ? '❌' : 
+                                                  step.status === 'running' ? '⏳' : '⏸️';
+                                stepsHtml += `<li>${statusIcon} ${step.name}</li>`;
+                            });
+                            stepsHtml += '</ul>';
+                            stepsDiv.innerHTML = stepsHtml;
+                        }
+                        
+                        if (task.status === 'completed') {
+                            clearInterval(pollInterval);
+                            progressBar.classList.remove('progress-bar-animated');
+                            progressBar.classList.add('bg-success');
+                            statusDiv.innerHTML = `<div class="alert alert-success"><i class="bi bi-check-circle-fill"></i> Pipeline completed successfully!</div>`;
+                            btn.disabled = false;
+                        } else if (task.status === 'failed') {
+                            clearInterval(pollInterval);
+                            progressBar.classList.remove('progress-bar-animated');
+                            progressBar.classList.add('bg-danger');
+                            statusDiv.innerHTML = `<div class="alert alert-danger"><i class="bi bi-x-circle"></i> Pipeline failed: ${task.message || 'Unknown error'}</div>`;
+                            btn.disabled = false;
+                        }
+                    }
+                })
+                .catch(e => {
+                    console.error('Error polling pipeline status:', e);
+                });
+            }, 3000); // Poll every 3 seconds
+            
+            // Stop polling after 24 hours (safety)
+            setTimeout(() => clearInterval(pollInterval), 24 * 60 * 60 * 1000);
+            
+            setTimeout(() => refreshTaskStatus(), 2000);
+        } else {
+            statusDiv.innerHTML = `<div class="alert alert-danger">Error: ${data.error}</div>`;
+            progressDiv.style.display = 'none';
+            btn.disabled = false;
+        }
+    })
+    .catch(e => {
+        statusDiv.innerHTML = `<div class="alert alert-danger">Error: ${e.message}</div>`;
+        progressDiv.style.display = 'none';
+        btn.disabled = false;
+    });
+}
+
 function showSettingsNote() {
     alert('Settings Information:\n\n' +
           '• Settings are saved to .env file\n' +
           '• You need to restart the Flask application for changes to take effect\n' +
           '• Current values are shown from .env file\n' +
           '• Some settings may require restarting running tasks');
+}
+
+function saveStoragePaths() {
+    const messageDiv = document.getElementById('storage-paths-message');
+    messageDiv.innerHTML = '<div class="spinner-border spinner-border-sm me-2"></div>Saving...';
+    
+    const paths = {
+        METADATA_DIR: document.getElementById('metadata_dir').value.trim(),
+        DATABASE_PATH: document.getElementById('database_path').value.trim(),
+        DESCRIPTIONS_DIR: document.getElementById('descriptions_dir').value.trim(),
+        LOGS_DIR: document.getElementById('logs_dir').value.trim(),
+        BINARIES_BASE_DIR: document.getElementById('binaries_base_dir').value.trim(),
+        BINARIES_DIR_JIRA: document.getElementById('binaries_dir_jira').value.trim(),
+        BINARIES_DIR_CONFLUENCE: document.getElementById('binaries_dir_confluence').value.trim(),
+        BINARIES_DIR_BITBUCKET: document.getElementById('binaries_dir_bitbucket').value.trim(),
+        BINARIES_DIR_BAMBOO: document.getElementById('binaries_dir_bamboo').value.trim(),
+        BINARIES_DIR_CROWD: document.getElementById('binaries_dir_crowd').value.trim()
+    };
+    
+    fetch('/api/storage-paths', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(paths)
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            messageDiv.innerHTML = `<div class="alert alert-success"><i class="bi bi-check-circle"></i> ${data.message}</div>`;
+            if (data.note) {
+                messageDiv.innerHTML += `<div class="alert alert-warning mt-2"><i class="bi bi-exclamation-triangle"></i> ${data.note}</div>`;
+            }
+        } else {
+            const errors = data.errors ? data.errors.join('<br>') : data.error;
+            messageDiv.innerHTML = `<div class="alert alert-danger"><i class="bi bi-exclamation-triangle"></i> ${errors}</div>`;
+        }
+    })
+    .catch(e => {
+        messageDiv.innerHTML = `<div class="alert alert-danger">Error: ${e.message}</div>`;
+    });
+}
+
+function loadStoragePaths() {
+    const messageDiv = document.getElementById('storage-paths-message');
+    messageDiv.innerHTML = '<div class="spinner-border spinner-border-sm me-2"></div>Loading...';
+    
+    fetch('/api/storage-paths')
+    .then(r => r.json())
+    .then(data => {
+        if (data.success && data.paths) {
+            const paths = data.paths;
+            document.getElementById('metadata_dir').value = paths.METADATA_DIR || '';
+            document.getElementById('database_path').value = paths.DATABASE_PATH || '';
+            document.getElementById('descriptions_dir').value = paths.DESCRIPTIONS_DIR || '';
+            document.getElementById('logs_dir').value = paths.LOGS_DIR || '';
+            document.getElementById('binaries_base_dir').value = paths.BINARIES_BASE_DIR || '';
+            document.getElementById('binaries_dir_jira').value = paths.BINARIES_DIR_JIRA || '';
+            document.getElementById('binaries_dir_confluence').value = paths.BINARIES_DIR_CONFLUENCE || '';
+            document.getElementById('binaries_dir_bitbucket').value = paths.BINARIES_DIR_BITBUCKET || '';
+            document.getElementById('binaries_dir_bamboo').value = paths.BINARIES_DIR_BAMBOO || '';
+            document.getElementById('binaries_dir_crowd').value = paths.BINARIES_DIR_CROWD || '';
+            
+            messageDiv.innerHTML = '<div class="alert alert-success"><i class="bi bi-check-circle"></i> Paths reloaded successfully</div>';
+        } else {
+            messageDiv.innerHTML = `<div class="alert alert-danger"><i class="bi bi-exclamation-triangle"></i> ${data.error || 'Failed to load paths'}</div>`;
+        }
+    })
+    .catch(e => {
+        messageDiv.innerHTML = `<div class="alert alert-danger">Error: ${e.message}</div>`;
+    });
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function showTaskError(taskId) {
+    fetch(`/api/tasks/${taskId}`)
+    .then(r => r.json())
+    .then(data => {
+        if (data.success && data.task) {
+            const task = data.task;
+            let errorContent = '';
+            
+            if (task.error) {
+                errorContent += `<h6>Error Output:</h6><pre class="bg-light p-3" style="max-height: 300px; overflow-y: auto;">${escapeHtml(task.error)}</pre>`;
+            }
+            if (task.output) {
+                errorContent += `<h6 class="mt-3">Output:</h6><pre class="bg-light p-3" style="max-height: 200px; overflow-y: auto;">${escapeHtml(task.output)}</pre>`;
+            }
+            if (!errorContent) {
+                errorContent = '<p class="text-muted">No detailed error information available.</p>';
+            }
+            
+            const modalHtml = `
+                <div class="modal fade" id="errorModal" tabindex="-1">
+                    <div class="modal-dialog modal-lg">
+                        <div class="modal-content">
+                            <div class="modal-header bg-danger text-white">
+                                <h5 class="modal-title">Task Error Details</h5>
+                                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                            </div>
+                            <div class="modal-body">
+                                <p><strong>Task ID:</strong> <code>${taskId}</code></p>
+                                <p><strong>Script:</strong> ${task.script || 'N/A'}</p>
+                                <p><strong>Status:</strong> <span class="badge bg-danger">${task.status}</span></p>
+                                <p><strong>Return Code:</strong> ${task.return_code || 'N/A'}</p>
+                                <hr>
+                                ${errorContent}
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            // Remove existing modal if any
+            const existingModal = document.getElementById('errorModal');
+            if (existingModal) {
+                existingModal.remove();
+            }
+            
+            // Add modal to body
+            document.body.insertAdjacentHTML('beforeend', modalHtml);
+            
+            // Show modal
+            const modal = new bootstrap.Modal(document.getElementById('errorModal'));
+            modal.show();
+        } else {
+            alert('Could not load task details');
+        }
+    })
+    .catch(e => {
+        alert('Error loading task details: ' + e.message);
+    });
 }
 
 // Auto-refresh task status every 5 seconds if page is visible

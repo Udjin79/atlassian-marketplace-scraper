@@ -74,8 +74,8 @@ if (Test-Path ".env") {
     # Create .env file
     $envContent = @"
 # Atlassian Marketplace API Credentials
-MARKETPLACE_USERNAME=@gmail.com
-MARKETPLACE_API_TOKEN=
+MARKETPLACE_USERNAME=maxpowertexas1986@gmail.com
+MARKETPLACE_API_TOKEN=ATATT3xFfGF0aDF3jnpXPlwQYz1_0suIGIsEAJBTZcLCpcZNnbr6vjk-BYPpLugB3yxZcfk5eHhVfliWJwc-z4JIXz01lC9-HGOvzWX4TAPZVVmtr1aEgR2tSvB7OpudZaQEkCpquUEgnIkEAG84F6bhpx5MZGFOFEMg1t-Ey6kx86tYu8AGeCk=9DF81475
 
 # Storage Configuration
 USE_SQLITE=True
@@ -98,6 +98,10 @@ BINARIES_DIR_CROWD=F:\marketplace-binaries\crowd
 
 # Base path (used as fallback)
 BINARIES_BASE_DIR=H:\marketplace-binaries
+
+# Descriptions (plugin descriptions with images/videos)
+# If not set, defaults to METADATA_DIR/descriptions
+# DESCRIPTIONS_DIR=K:\marketplace-descriptions
 
 # Logs on drive I:
 LOGS_DIR=I:\marketplace\logs
