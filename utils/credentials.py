@@ -174,9 +174,9 @@ def get_credentials() -> Dict[str, str]:
     if not credentials.get('username') or not credentials.get('api_token'):
         logger.info("Credentials empty in .credentials.json, checking .env file")
         try:
-            from config import settings
-            env_username = settings.MARKETPLACE_USERNAME
-            env_token = settings.MARKETPLACE_API_TOKEN
+            from decouple import config
+            env_username = config('MARKETPLACE_USERNAME', default='')
+            env_token = config('MARKETPLACE_API_TOKEN', default='')
 
             if env_username and env_token:
                 logger.info("Using credentials from .env file")
@@ -245,9 +245,9 @@ def get_all_credentials() -> List[Dict[str, str]]:
     if not accounts:
         logger.info("No credentials in .credentials.json, checking .env file")
         try:
-            from config import settings
-            env_username = settings.MARKETPLACE_USERNAME
-            env_token = settings.MARKETPLACE_API_TOKEN
+            from decouple import config
+            env_username = config('MARKETPLACE_USERNAME', default='')
+            env_token = config('MARKETPLACE_API_TOKEN', default='')
 
             if env_username and env_token:
                 logger.info("Using credentials from .env file")
