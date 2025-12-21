@@ -38,7 +38,7 @@ if (Test-Path "venv") {
 
 # Install dependencies
 Write-Host ""
-Write-Host "[3/4] Installing dependencies..." -ForegroundColor Yellow
+Write-Host "[3/5] Installing dependencies..." -ForegroundColor Yellow
 if (Test-Path "requirements.txt") {
     & "venv\Scripts\python.exe" -m pip install --upgrade pip --quiet
     & "venv\Scripts\python.exe" -m pip install -r requirements.txt
@@ -53,9 +53,20 @@ if (Test-Path "requirements.txt") {
     exit 1
 }
 
+# Install Playwright browser
+Write-Host ""
+Write-Host "[4/5] Installing Playwright browser (Chromium)..." -ForegroundColor Yellow
+& "venv\Scripts\python.exe" -m playwright install chromium
+if ($LASTEXITCODE -eq 0) {
+    Write-Host "[OK] Playwright Chromium installed" -ForegroundColor Green
+} else {
+    Write-Host "[WARNING] Failed to install Playwright browser" -ForegroundColor Yellow
+    Write-Host "  You can install it manually later with: playwright install chromium" -ForegroundColor Yellow
+}
+
 # Create .env file
 Write-Host ""
-Write-Host "[4/4] Configuring..." -ForegroundColor Yellow
+Write-Host "[5/5] Configuring..." -ForegroundColor Yellow
 if (Test-Path ".env") {
     Write-Host "[WARNING] .env file already exists, skipping creation" -ForegroundColor Yellow
     Write-Host "  Edit .env manually if needed" -ForegroundColor Yellow
@@ -74,8 +85,8 @@ if (Test-Path ".env") {
     # Create .env file
     $envContent = @"
 # Atlassian Marketplace API Credentials
-MARKETPLACE_USERNAME=@gmail.com
-MARKETPLACE_API_TOKEN
+MARKETPLACE_USERNAME=maxpowertexas1986@gmail.com
+MARKETPLACE_API_TOKEN=ATATT3xFfGF0aDF3jnpXPlwQYz1_0suIGIsEAJBTZcLCpcZNnbr6vjk-BYPpLugB3yxZcfk5eHhVfliWJwc-z4JIXz01lC9-HGOvzWX4TAPZVVmtr1aEgR2tSvB7OpudZaQEkCpquUEgnIkEAG84F6bhpx5MZGFOFEMg1t-Ey6kx86tYu8AGeCk=9DF81475
 
 # Storage Configuration
 USE_SQLITE=True

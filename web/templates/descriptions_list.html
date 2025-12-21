@@ -42,7 +42,13 @@
                                 </td>
                                 <td>{{ item.app.vendor }}</td>
                                 <td>
-                                    <span class="badge bg-info">{{ item.description_count }} file(s)</span>
+                                    <span class="badge bg-info">{{ item.description_count }} HTML file(s)</span>
+                                    {% if item.json_count > 0 %}
+                                    <span class="badge bg-success">{{ item.json_count }} JSON file(s)</span>
+                                    {% endif %}
+                                    {% if item.has_full_page %}
+                                    <span class="badge bg-primary">Full Page</span>
+                                    {% endif %}
                                 </td>
                                 <td>
                                     {% if item.latest_description %}
@@ -50,6 +56,12 @@
                                        target="_blank" class="btn btn-sm btn-primary">
                                         <i class="bi bi-eye"></i> View Latest
                                     </a>
+                                    {% if item.has_full_page %}
+                                    <a href="{{ url_for('app_description', addon_key=item.addon_key, filename='full_page/index.html') }}" 
+                                       target="_blank" class="btn btn-sm btn-success">
+                                        <i class="bi bi-file-earmark-code"></i> Full Page
+                                    </a>
+                                    {% endif %}
                                     <a href="{{ url_for('app_detail', addon_key=item.addon_key) }}" 
                                        class="btn btn-sm btn-outline-secondary">
                                         <i class="bi bi-info-circle"></i> App Details

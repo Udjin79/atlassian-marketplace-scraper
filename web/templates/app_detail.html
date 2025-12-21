@@ -53,6 +53,13 @@
                         {% if app.description %}
                         <p class="mt-3">{{ app.description }}</p>
                         {% endif %}
+                        
+                        {% if api_overview %}
+                        <div class="mt-3">
+                            <h6>Detailed Description:</h6>
+                            <div class="text-muted">{{ api_overview|safe }}</div>
+                        </div>
+                        {% endif %}
 
                         {% if app.marketplace_url %}
                         <a href="{{ app.marketplace_url }}" target="_blank" class="btn btn-outline-primary">

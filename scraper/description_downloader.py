@@ -6,7 +6,7 @@ import re
 import hashlib
 import mimetypes
 from pathlib import Path
-from typing import Dict, Optional, Tuple, List
+from typing import Dict, Optional, Tuple, List, Union, Union
 from datetime import datetime, timezone
 from html import escape
 from urllib.parse import urljoin, urlparse
@@ -21,6 +21,79 @@ logger = get_logger('description_downloader')
 
 API_BASE = "https://marketplace.atlassian.com/rest/2"
 MARKETPLACE_BASE = "https://marketplace.atlassian.com"
+
+
+# Helper functions for marketplace page saving
+def _normalize_marketplace_url(url: str) -> str:
+    """
+    Normalize Marketplace URL to absolute URL.
+    
+    Args:
+        url: Relative or absolute URL
+        
+    Returns:
+        Absolute URL
+    """
+    # Relative link from JSON like "/apps/6820/..."
+    if url.startswith("/"):
+        return f"{MARKETPLACE_BASE}{url}"
+    # Without scheme
+    if not url.lower().startswith(("http://", "https://")):
+        return f"{MARKETPLACE_BASE}/{url.lstrip('/')}"
+    return url
+
+
+def _should_skip_resource(url: str) -> bool:
+    """
+    Check if resource URL should be skipped.
+    
+    Args:
+        url: Resource URL
+        
+    Returns:
+        True if should skip
+    """
+    low = url.lower()
+    return (
+        low.startswith("data:")
+        or low.startswith("javascript:")
+        or low.startswith("#")
+        or low.startswith("mailto:")
+        or low.startswith("tel:")
+    )
+
+
+def _safe_filename_from_url(url: str, content_type: Optional[str] = None) -> str:
+    """
+    Generate safe filename from URL.
+    
+    Args:
+        url: Resource URL
+        content_type: Optional content type from response headers
+        
+    Returns:
+        Safe filename
+    """
+    parsed = urlparse(url)
+    base = os.path.basename(parsed.path) or "resource"
+
+    # If no extension - try to guess from content-type
+    root, ext = os.path.splitext(base)
+    if not ext and content_type:
+        ct = content_type.split(";")[0].strip().lower()
+        guessed = mimetypes.guess_extension(ct) or ""
+        if guessed:
+            ext = guessed
+            base = f"{base}{ext}"
+
+    # Collision protection: add short URL hash
+    h = hashlib.sha1(url.encode("utf-8")).hexdigest()[:10]
+    root, ext = os.path.splitext(base)
+    base = f"{root}_{h}{ext}"
+
+    # Remove dangerous characters for Windows/FS
+    base = "".join(ch if ch not in '\\/:*?"<>|' else "_" for ch in base)
+    return base
 
 
 class DescriptionDownloader:
@@ -337,15 +410,155 @@ class DescriptionDownloader:
         """
         # If marketplace_url provided, download full page instead
         if marketplace_url:
+            # Try full page saver from old version (RECOMMENDED - uses complete page_saver logic)
+            try:
+                from scraper.page_saver_integrated import save_webpage_full
+                
+                output_dir = Path(self.descriptions_dir) / addon_key.replace('.', '_') / 'full_page'
+                output_dir.mkdir(parents=True, exist_ok=True)
+                
+                html_path = output_dir / 'index.html'
+                assets_dir = output_dir / 'assets'
+                
+                result = save_webpage_full(
+                    url=marketplace_url,
+                    output=str(html_path),
+                    offline=True,
+                    assets_dir=str(assets_dir),
+                    timeout=120,
+                    wait_seconds=10,
+                    session=self.session
+                )
+                
+                if result and Path(result.output_html).exists():
+                    logger.info(f"Successfully downloaded full page for {addon_key}")
+                    # Also download API description for web interface
+                    try:
+                        api_json_path, api_html_path = self._download_api_description(
+                            addon_key, version_name, hosting, locale, download_media
+                        )
+                        if api_json_path:
+                            logger.info(f"Also downloaded API description for {addon_key}")
+                    except Exception as e:
+                        logger.warning(f"Failed to download API description: {e}")
+                    return None, Path(result.output_html)
+            except ImportError as e:
+                logger.warning(f"page_saver_integrated not available: {e}, trying Playwright method")
+            except Exception as e:
+                logger.warning(f"Full page saver failed: {str(e)}, trying Playwright method")
+            
+            # Fallback: Try Playwright method
+            try:
+                output_dir = Path(self.descriptions_dir) / addon_key.replace('.', '_') / 'full_page'
+                output_dir.mkdir(parents=True, exist_ok=True)
+                
+                html_path = output_dir / 'index.html'
+                
+                html_path_result = self.save_marketplace_page_with_playwright(
+                    download_url=marketplace_url,
+                    save_path=html_path,
+                    format='html',
+                    wait_seconds=10,
+                    timeout=120
+                )
+                
+                if html_path_result and html_path_result.exists():
+                    logger.info(f"Successfully downloaded page with Playwright (HTML) for {addon_key}")
+                    # Also download API description for web interface
+                    try:
+                        api_json_path, api_html_path = self._download_api_description(
+                            addon_key, version_name, hosting, locale, download_media
+                        )
+                        if api_json_path:
+                            logger.info(f"Also downloaded API description for {addon_key}")
+                    except Exception as e:
+                        logger.warning(f"Failed to download API description: {e}")
+                    return None, html_path_result
+            except ImportError:
+                logger.warning("Playwright not installed, skipping Playwright method. Install with: pip install playwright && playwright install chromium")
+            except Exception as e:
+                logger.warning(f"Playwright method failed for {addon_key}: {str(e)}, trying script removal method")
+            
+            # Fallback: Try script removal method (works offline but may not have JS content)
+            try:
+                output_dir = Path(self.descriptions_dir) / addon_key.replace('.', '_') / 'full_page'
+                html_path_new = output_dir / 'index.html'
+                
+                html_path_result, assets_dir = self.save_marketplace_plugin_page(
+                    download_url=marketplace_url,
+                    save_html_path=html_path_new,
+                    encoding='utf-8',
+                    download_media=download_media,
+                    timeout=60
+                )
+                
+                if html_path_result and html_path_result.exists():
+                    logger.info(f"Successfully downloaded page (scripts removed) for {addon_key}")
+                    return None, html_path_result
+            except Exception as e:
+                logger.warning(f"save_marketplace_plugin_page failed for {addon_key}: {str(e)}, trying static API method")
+            
+            # Fallback to static API method (uses REST API)
+            try:
+                output_dir = Path(self.descriptions_dir) / addon_key.replace('.', '_') / 'full_page'
+                html_path_new = output_dir / 'index.html'
+                
+                html_path_result, assets_dir = self.save_marketplace_plugin_page_static(
+                    download_url=marketplace_url,
+                    save_html_path=html_path_new,
+                    encoding='utf-8',
+                    download_media=download_media,
+                    addon_key=addon_key,  # We already have it, pass explicitly
+                    timeout=60
+                )
+                
+                if html_path_result and html_path_result.exists():
+                    logger.info(f"Successfully downloaded static snapshot for {addon_key}")
+                    return None, html_path_result
+            except Exception as e:
+                logger.warning(f"Static snapshot failed for {addon_key}: {str(e)}, trying original method")
+            
+            # Fallback to original method
             html_path = self.download_full_marketplace_page(
                 marketplace_url,
                 addon_key,
                 download_assets=download_media
             )
             if html_path:
+                # Also download API description for web interface
+                try:
+                    api_json_path, api_html_path = self._download_api_description(
+                        addon_key, version_name, hosting, locale, download_media
+                    )
+                    if api_json_path:
+                        logger.info(f"Also downloaded API description for {addon_key}")
+                except Exception as e:
+                    logger.warning(f"Failed to download API description: {e}")
                 return None, html_path
-            # Fallback to API if full page download fails
-            logger.warning(f"Full page download failed, falling back to API for {addon_key}")
+            # Fallback to API if all full page downloads fail
+            logger.warning(f"All full page download methods failed, falling back to API for {addon_key}")
+        
+        # Download API description (always, even if full_page was downloaded)
+        try:
+            return self._download_api_description(addon_key, version_name, hosting, locale, download_media)
+        except Exception as e:
+            logger.error(f"Error downloading API description for {addon_key}: {str(e)}")
+            return None, None
+    
+    def _download_api_description(
+        self,
+        addon_key: str,
+        version_name: Optional[str] = None,
+        hosting: str = "datacenter",
+        locale: str = "en_US",
+        download_media: bool = True
+    ) -> Tuple[Optional[Path], Optional[Path]]:
+        """
+        Download description from API (internal method).
+        
+        Returns:
+            Tuple of (json_path, html_path) or (None, None) on error
+        """
         try:
             # Get versions
             versions = self._get_versions(addon_key, hosting)
@@ -835,44 +1048,1188 @@ class DescriptionDownloader:
 
         for idx, app in enumerate(apps, 1):
             addon_key = app.get('addon_key')
-            marketplace_url = app.get('marketplace_url')
+            marketplace_url_raw = app.get('marketplace_url')
             
             if not addon_key:
                 continue
 
             logger.info(f"[{idx}/{total}] Downloading description for {addon_key}")
 
-            # If marketplace_url is empty, try to construct it
-            if not marketplace_url or not marketplace_url.strip():
+            # Handle marketplace_url - can be string or dict
+            marketplace_url = None
+            if marketplace_url_raw:
+                if isinstance(marketplace_url_raw, dict):
+                    marketplace_url = marketplace_url_raw.get('href', '')
+                elif isinstance(marketplace_url_raw, str):
+                    marketplace_url = marketplace_url_raw.strip()
+            
+            # If marketplace_url is empty, construct it
+            if not marketplace_url:
                 logger.debug(f"marketplace_url is empty for {addon_key}, will construct URL")
-                marketplace_url = None  # Will be constructed in download_full_marketplace_page
+                marketplace_url = f"https://marketplace.atlassian.com/apps/{addon_key}?hosting=datacenter&tab=overview"
 
-            if use_full_page:
-                # Download full HTML page
-                html_path = self.download_full_marketplace_page(
-                    marketplace_url,
-                    addon_key,
-                    download_assets=download_media
-                )
+            # Always use download_description - it handles both full_page and API
+            # If use_full_page=True, it will download full_page + API
+            # If use_full_page=False, it will only download API
+            json_path, html_path = self.download_description(
+                addon_key,
+                download_media=download_media,
+                marketplace_url=marketplace_url if use_full_page else None
+            )
+
+            if json_path or html_path:
+                success_count += 1
+                logger.info(f"[OK] Success: {addon_key}")
+                if json_path:
+                    logger.debug(f"  JSON: {json_path}")
                 if html_path:
-                    success_count += 1
-                    logger.info(f"[OK] Success: {addon_key}")
-                else:
-                    fail_count += 1
-                    logger.warning(f"[ERROR] Failed: {addon_key}")
+                    logger.debug(f"  HTML: {html_path}")
             else:
-                # Use API-based description
-                json_path, html_path = self.download_description(
-                    addon_key,
-                    download_media=download_media
-                )
-
-                if json_path and html_path:
-                    success_count += 1
-                    logger.info(f"[OK] Success: {addon_key}")
-                else:
-                    fail_count += 1
-                    logger.warning(f"[ERROR] Failed: {addon_key}")
+                fail_count += 1
+                logger.warning(f"[ERROR] Failed: {addon_key}")
 
         logger.info(f"Description download complete: {success_count} success, {fail_count} failed")
+
+    def save_marketplace_page_with_playwright(
+        self,
+        download_url: str,
+        save_path: Union[str, os.PathLike],
+        format: str = "mhtml",
+        wait_seconds: int = 8,
+        timeout: int = 90,
+    ) -> Path:
+        """
+        Save Marketplace page using Playwright (headless browser).
+        This method executes JavaScript and captures the fully rendered page.
+        
+        Args:
+            download_url: Marketplace URL (can be relative or absolute)
+            save_path: Where to save the file
+            format: Output format - "mhtml" (single file) or "html" (HTML + assets folder)
+            wait_seconds: How long to wait after page load for JS to finish
+            timeout: Maximum time to wait for page load
+            
+        Returns:
+            Path to saved file
+            
+        Raises:
+            ImportError: If playwright is not installed
+            Exception: If page save fails
+        """
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            raise ImportError(
+                "playwright is required for this method. Install it with: pip install playwright && playwright install chromium"
+            )
+        
+        page_url = _normalize_marketplace_url(str(download_url).strip())
+        save_path = Path(save_path).expanduser().resolve()
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        logger.info(f"Saving page with Playwright: {page_url} -> {save_path}")
+        
+        with sync_playwright() as p:
+            browser = p.chromium.launch(
+                headless=True,
+                args=[
+                    '--disable-blink-features=AutomationControlled',
+                    '--disable-dev-shm-usage',
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox'
+                ]
+            )
+            context = browser.new_context(
+                viewport={"width": 1920, "height": 1080},
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                bypass_csp=True,
+                # Ignore HTTPS errors if needed
+                ignore_https_errors=False
+            )
+            
+            # Block unnecessary resources to speed up loading
+            def route_handler(route):
+                url = route.request.url
+                # Block analytics, tracking, and other non-essential resources
+                blocked_patterns = [
+                    'analytics', 'tracking', 'doubleclick', 'googlesyndication',
+                    'facebook.com/tr', 'optimizely.com', 'hotjar.com',
+                    'googletagmanager.com', 'google-analytics.com'
+                ]
+                if any(pattern in url.lower() for pattern in blocked_patterns):
+                    route.abort()
+                else:
+                    route.continue_()
+            
+            context.route("**/*", route_handler)
+            
+            # Add authentication if available
+            if settings.MARKETPLACE_USERNAME and settings.MARKETPLACE_API_TOKEN:
+                import base64
+                token = base64.b64encode(
+                    f"{settings.MARKETPLACE_USERNAME}:{settings.MARKETPLACE_API_TOKEN}".encode("utf-8")
+                ).decode("ascii")
+                context.set_extra_http_headers({
+                    "Authorization": f"Basic {token}"
+                })
+            
+            page = context.new_page()
+            
+            try:
+                # Navigate and wait for page to load
+                # Use "load" instead of "networkidle" as Marketplace has continuous background requests
+                # Marketplace pages never reach "networkidle" due to analytics/tracking
+                try:
+                    page.goto(page_url, wait_until="load", timeout=timeout * 1000)
+                    logger.debug("Page loaded successfully")
+                except Exception as e:
+                    # If load fails, try domcontentloaded as fallback
+                    logger.warning(f"Load timeout ({timeout}s), trying domcontentloaded: {str(e)[:100]}")
+                    try:
+                        page.goto(page_url, wait_until="domcontentloaded", timeout=timeout * 1000)
+                        logger.debug("Page loaded with domcontentloaded")
+                    except Exception as e2:
+                        # Last resort: just navigate without waiting
+                        logger.warning(f"domcontentloaded also failed, proceeding anyway: {str(e2)[:100]}")
+                        page.goto(page_url, timeout=30000)  # 30 second minimum
+                
+                # Wait additional time for JavaScript to finish rendering
+                # This gives time for SPA to render content
+                logger.debug(f"Waiting {wait_seconds} seconds for JavaScript to render...")
+                page.wait_for_timeout(wait_seconds * 1000)
+                
+                # Try to wait for specific elements that indicate page is loaded
+                # This is more reliable than networkidle for SPAs
+                content_loaded = False
+                selectors_to_try = [
+                    "main",
+                    "[role='main']",
+                    "#amkt-frontend-content",
+                    "section",
+                    "article",
+                    ".app-details",
+                    "[data-testid]"
+                ]
+                
+                for selector in selectors_to_try:
+                    try:
+                        page.wait_for_selector(selector, timeout=5000)
+                        logger.debug(f"Content selector found: {selector}")
+                        content_loaded = True
+                        break
+                    except Exception:
+                        continue
+                
+                if not content_loaded:
+                    logger.warning("No content selectors found, but proceeding anyway")
+                
+                # Additional wait to ensure all dynamic content is loaded
+                # Marketplace SPA may need extra time to render
+                page.wait_for_timeout(3000)  # 3 more seconds
+                
+                # Check if page has actual content (not just skeleton/loading)
+                try:
+                    page_text = page.inner_text("body")
+                    text_length = len(page_text)
+                    logger.debug(f"Page text length: {text_length} characters")
+                    if text_length < 100:
+                        logger.warning(f"Page content seems too short ({text_length} chars), waiting more...")
+                        page.wait_for_timeout(5000)  # Wait 5 more seconds
+                        # Check again
+                        page_text = page.inner_text("body")
+                        text_length = len(page_text)
+                        logger.debug(f"Page text length after additional wait: {text_length} characters")
+                except Exception as e:
+                    logger.debug(f"Could not check page text length: {str(e)}")
+                
+                if format.lower() == "mhtml":
+                    # Save as MHTML (single file, includes all resources)
+                    # Use CDP (Chrome DevTools Protocol) to capture snapshot
+                    try:
+                        cdp = context.new_cdp_session(page)
+                        result = cdp.send("Page.captureSnapshot", {"format": "mhtml"})
+                        mhtml_data = result.get("data", "")
+                        
+                        if not mhtml_data or len(mhtml_data) < 1000:
+                            # If MHTML is too small, fallback to HTML method
+                            logger.warning("MHTML data seems empty or too small, using HTML method instead")
+                            raise ValueError("MHTML data too small")
+                        
+                        save_path.write_text(mhtml_data, encoding="utf-8", errors="replace")
+                        file_size = save_path.stat().st_size
+                        logger.info(f"Saved MHTML: {save_path} ({file_size} bytes)")
+                        
+                        # Verify file was written correctly
+                        if file_size < 1000:
+                            raise ValueError(f"MHTML file too small: {file_size} bytes")
+                            
+                    except Exception as e:
+                        # Fallback: save as HTML with embedded resources
+                        logger.warning(f"MHTML capture failed: {str(e)}, falling back to HTML method")
+                        html_content = page.content()
+                        
+                        # Remove scripts to prevent SPA routing issues
+                        soup = BeautifulSoup(html_content, "lxml")
+                        for s in soup.find_all("script"):
+                            s.decompose()
+                        
+                        # Ensure metadata
+                        self._ensure_html_metadata(soup)
+                        
+                        # Save as HTML instead
+                        html_path = save_path.with_suffix('.html')
+                        out_html = str(soup)
+                        if not out_html.strip().startswith('<!DOCTYPE'):
+                            out_html = '<!DOCTYPE html>\n' + out_html
+                        html_path.write_text(out_html, encoding="utf-8", errors="replace")
+                        logger.info(f"Saved as HTML instead: {html_path} ({html_path.stat().st_size} bytes)")
+                        return html_path
+                    
+                elif format.lower() == "html":
+                    # Save as HTML with assets folder - using full page_saver logic
+                    # Get page content after JS execution
+                    html_content = page.content()
+                    final_url = page.url
+                    
+                    # Check if HTML has content
+                    if not html_content or len(html_content) < 1000:
+                        logger.error("HTML content is empty or too small, page may not have loaded")
+                        raise ValueError("Page content is empty")
+                    
+                    # Parse HTML
+                    soup = BeautifulSoup(html_content, "lxml")
+                    
+                    # Create assets directory
+                    assets_dir = save_path.parent / "assets"
+                    assets_dir.mkdir(parents=True, exist_ok=True)
+                    
+                    # Dictionary to track downloaded assets: abs_url -> rel_path
+                    downloaded_assets: Dict[str, str] = {}
+                    
+                    # Helper to save asset and return relative path
+                    def save_asset(abs_url: str, subfolder: str = "") -> str:
+                        """Download asset and return relative path from HTML to asset."""
+                        if _should_skip_resource(abs_url):
+                            return abs_url
+                        if abs_url in downloaded_assets:
+                            return downloaded_assets[abs_url]
+                        
+                        try:
+                            resp = self.session.get(abs_url, timeout=timeout)
+                            resp.raise_for_status()
+                        except Exception as e:
+                            logger.debug(f"Failed to download asset {abs_url}: {e}")
+                            return abs_url
+                        
+                        # Determine file extension from content-type or URL
+                        ctype = (resp.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+                        default_ext = {
+                            "text/css": ".css",
+                            "application/javascript": ".js",
+                            "text/javascript": ".js",
+                            "image/png": ".png",
+                            "image/jpeg": ".jpg",
+                            "image/jpg": ".jpg",
+                            "image/gif": ".gif",
+                            "image/webp": ".webp",
+                            "image/svg+xml": ".svg",
+                            "font/woff2": ".woff2",
+                            "font/woff": ".woff",
+                            "font/ttf": ".ttf",
+                        }.get(ctype, "")
+                        
+                        fname = _safe_filename_from_url(abs_url, ctype)
+                        
+                        # Determine target directory
+                        if subfolder:
+                            target_dir = assets_dir / subfolder
+                        else:
+                            target_dir = assets_dir
+                        target_dir.mkdir(parents=True, exist_ok=True)
+                        
+                        target = target_dir / fname
+                        
+                        # Write file
+                        target.write_bytes(resp.content)
+                        logger.debug(f"Downloaded asset: {abs_url} -> {target.name}")
+                        
+                        # Calculate relative path from HTML to asset
+                        try:
+                            rel_path = os.path.relpath(target, save_path.parent)
+                            rel_path = rel_path.replace("\\", "/")
+                            if not rel_path.startswith(("./", "../", "assets/")):
+                                rel_path = "assets/" + rel_path.split("assets/")[-1] if "assets/" in rel_path else "assets/" + fname
+                        except (ValueError, OSError):
+                            # Fallback for different drives
+                            rel_path = f"assets/{subfolder}/{fname}" if subfolder else f"assets/{fname}"
+                        
+                        downloaded_assets[abs_url] = rel_path
+                        return rel_path
+                    
+                    # Process images
+                    for img in soup.find_all("img"):
+                        if img.has_attr("src"):
+                            src = img["src"]
+                            if not _should_skip_resource(src):
+                                abs_src = urljoin(final_url, src)
+                                img["src"] = save_asset(abs_src, "img")
+                    
+                    # Process stylesheets and icons
+                    for link in soup.find_all("link"):
+                        href = link.get("href")
+                        if not href or _should_skip_resource(href):
+                            continue
+                        rel = ",".join(link.get("rel", [])).lower()
+                        if "stylesheet" in rel or ("preload" in rel and link.get("as") == "style"):
+                            abs_href = urljoin(final_url, href)
+                            link["href"] = save_asset(abs_href, "css")
+                        elif any(k in rel for k in ["icon", "shortcut icon", "apple-touch-icon"]):
+                            abs_href = urljoin(final_url, href)
+                            link["href"] = save_asset(abs_href, "icons")
+                    
+                    # Process scripts
+                    for script in soup.find_all("script"):
+                        src = script.get("src")
+                        if src and not _should_skip_resource(src):
+                            abs_src = urljoin(final_url, src)
+                            script["src"] = save_asset(abs_src, "js")
+                    
+                    # Process media (video, audio)
+                    for tag_name, attr in [("video", "src"), ("video", "poster"), ("audio", "src"), ("source", "src")]:
+                        for tag in soup.find_all(tag_name):
+                            if tag.has_attr(attr):
+                                src = tag[attr]
+                                if not _should_skip_resource(src):
+                                    abs_src = urljoin(final_url, src)
+                                    tag[attr] = save_asset(abs_src, "media")
+                    
+                    # Process CSS files - rewrite url() inside CSS
+                    _CSS_URL_RE = re.compile(r"url\(\s*([\"']?)(.+?)\1\s*\)", re.IGNORECASE)
+                    for link in soup.find_all("link", rel=lambda x: x and "stylesheet" in " ".join(x).lower()):
+                        href = link.get("href")
+                        if href and not _should_skip_resource(href):
+                            # Find the local CSS file path
+                            css_rel = link["href"]
+                            if css_rel.startswith("assets/"):
+                                css_path = save_path.parent / css_rel
+                                if css_path.exists():
+                                    try:
+                                        css_text = css_path.read_text(encoding="utf-8", errors="ignore")
+                                        # Find all url() in CSS
+                                        for match in _CSS_URL_RE.finditer(css_text):
+                                            url_in_css = match.group(2).strip()
+                                            if not _should_skip_resource(url_in_css):
+                                                abs_css_url = urljoin(final_url, url_in_css)
+                                                local_css_asset = save_asset(abs_css_url, "css_assets")
+                                                css_text = css_text.replace(url_in_css, local_css_asset)
+                                        css_path.write_text(css_text, encoding="utf-8")
+                                    except Exception as e:
+                                        logger.debug(f"Failed to process CSS file {css_path}: {e}")
+                    
+                    # Inject offline patches at the beginning of <head>
+                    head = soup.find("head")
+                    if not head:
+                        head = soup.new_tag("head")
+                        soup.html.insert(0, head)
+                    
+                    patch_script = soup.new_tag("script")
+                    patch_script.string = """
+                    (function() {
+                        'use strict';
+                        // Block fetch for API calls
+                        if (typeof fetch !== 'undefined') {
+                            const originalFetch = window.fetch;
+                            window.fetch = function(...args) {
+                                const url = args[0] && typeof args[0] === 'string' ? args[0] : 
+                                            (args[0] && args[0].url ? args[0].url : '');
+                                // Allow local files
+                                if (url && (
+                                    url.startsWith('file://') ||
+                                    url.startsWith('./') ||
+                                    url.startsWith('../') ||
+                                    (!url.includes('://') && !url.startsWith('/') && !url.startsWith('http'))
+                                )) {
+                                    return originalFetch.apply(this, args);
+                                }
+                                // Block API calls
+                                if (url && (
+                                    url.includes('api.atlassian.com') ||
+                                    url.includes('gateway/') ||
+                                    url.includes('/api/') ||
+                                    url.startsWith('http://') ||
+                                    url.startsWith('https://')
+                                )) {
+                                    console.log('[Offline Mode] Blocked fetch:', url);
+                                    return Promise.reject(new Error('Offline mode: API call blocked'));
+                                }
+                                return originalFetch.apply(this, args);
+                            };
+                        }
+                        // Block XMLHttpRequest for API calls
+                        if (typeof XMLHttpRequest !== 'undefined') {
+                            const OriginalXHR = window.XMLHttpRequest;
+                            window.XMLHttpRequest = function() {
+                                const xhr = new OriginalXHR();
+                                const originalOpen = xhr.open;
+                                xhr.open = function(method, url, ...rest) {
+                                    if (url && (
+                                        url.startsWith('file://') ||
+                                        url.startsWith('./') ||
+                                        url.startsWith('../') ||
+                                        (!url.includes('://') && !url.startsWith('/') && !url.startsWith('http'))
+                                    )) {
+                                        return originalOpen.apply(this, [method, url, ...rest]);
+                                    }
+                                    if (url && (
+                                        url.includes('api.atlassian.com') ||
+                                        url.includes('gateway/') ||
+                                        url.includes('/api/') ||
+                                        url.startsWith('http://') ||
+                                        url.startsWith('https://')
+                                    )) {
+                                        console.log('[Offline Mode] Blocked XHR:', url);
+                                        xhr.readyState = 0;
+                                        return;
+                                    }
+                                    return originalOpen.apply(this, [method, url, ...rest]);
+                                };
+                                return xhr;
+                            };
+                        }
+                    })();
+                    """
+                    head.insert(0, patch_script)
+                    
+                    # Remove all remaining script tags (except the patch)
+                    for script in soup.find_all("script"):
+                        if script != patch_script:
+                            script.decompose()
+                    
+                    # Remove base tag if exists (for offline mode)
+                    for base in soup.find_all("base"):
+                        base.decompose()
+                    
+                    # Ensure DOCTYPE and metadata
+                    self._ensure_html_metadata(soup)
+                    
+                    # Save final HTML
+                    out_html = str(soup)
+                    if not out_html.strip().startswith('<!DOCTYPE'):
+                        out_html = '<!DOCTYPE html>\n' + out_html
+                    
+                    save_path.write_text(out_html, encoding="utf-8", errors="replace")
+                    file_size = save_path.stat().st_size
+                    logger.info(f"Saved HTML with assets: {save_path} ({file_size} bytes, {len(downloaded_assets)} assets in {assets_dir})")
+                    
+                    if file_size < 1000:
+                        raise ValueError(f"HTML file too small: {file_size} bytes")
+                    
+                else:
+                    raise ValueError(f"Unsupported format: {format}. Use 'mhtml' or 'html'")
+                    
+            finally:
+                context.close()
+                browser.close()
+        
+        return save_path
+
+    def save_marketplace_plugin_page(
+        self,
+        download_url: str,
+        save_html_path: Union[str, os.PathLike],
+        encoding: str = "utf-8",
+        download_media: bool = False,
+        timeout: int = 30,
+    ) -> Tuple[Path, Optional[Path]]:
+        """
+        Save Marketplace page so it can be opened locally (file://).
+        - Removes all <script> tags (so SPA doesn't redraw page as 404)
+        - Optionally downloads CSS + images and rewrites links to local files
+
+        This is the RECOMMENDED method for offline viewing as it preserves
+        the visual content of the page without SPA JavaScript dependencies.
+
+        Args:
+            download_url: Link from JSON (href can be relative "/apps/...")
+            save_html_path: Where to save HTML
+            encoding: Encoding to write HTML to disk
+            download_media: Download CSS/images and rewrite links to local
+            timeout: Request timeout in seconds
+
+        Returns:
+            Tuple of (path_to_html, path_to_assets_dir_or_None)
+        """
+        if not download_url or not str(download_url).strip():
+            raise ValueError("download_url is empty")
+
+        page_url = _normalize_marketplace_url(str(download_url).strip())
+
+        html_path = Path(save_html_path).expanduser().resolve()
+        html_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Use existing session (already has auth if configured)
+        session = self.session
+        session.headers.update(
+            {
+                "User-Agent": "Mozilla/5.0 (offline-snapshot; requests)",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            }
+        )
+
+        resp = session.get(page_url, timeout=timeout, allow_redirects=True)
+        resp.raise_for_status()
+
+        # Ensure UTF-8 encoding for response
+        if resp.encoding is None or resp.encoding.lower() not in ['utf-8', 'utf8']:
+            resp.encoding = 'utf-8'
+
+        # Decode original HTML
+        html_text = resp.content.decode(encoding, errors="replace")
+
+        soup = BeautifulSoup(html_text, "lxml")
+
+        # KEY: Remove ALL scripts FIRST (otherwise SPA on file:// will show 404)
+        # This must be done before any other processing to prevent scripts from being re-added
+        scripts_removed = 0
+        for s in soup.find_all("script"):
+            s.decompose()
+            scripts_removed += 1
+        logger.debug(f"Removed {scripts_removed} script tags to prevent SPA routing")
+        
+        # Also remove noscript tags that might contain scripts or cause issues
+        for ns in soup.find_all("noscript"):
+            ns.decompose()
+
+        # If media not needed - just save "sanitized" HTML
+        if not download_media:
+            self._rewrite_links_to_absolute_marketplace(soup, base_url=resp.url)
+            # Ensure charset and DOCTYPE
+            self._ensure_html_metadata(soup)
+            out_html = str(soup)
+            if not out_html.strip().startswith('<!DOCTYPE'):
+                out_html = '<!DOCTYPE html>\n' + out_html
+            html_path.write_bytes(out_html.encode(encoding, errors="replace"))
+            logger.info(f"Saved HTML page (no media): {html_path}")
+            return html_path, None
+
+        # If need to "download media" - create assets folder
+        assets_dir = html_path.parent / f"{html_path.stem}_assets"
+        assets_dir.mkdir(parents=True, exist_ok=True)
+
+        # Download and rewrite:
+        # - <link rel="stylesheet" href="...">
+        # - <img src="...">
+        # - <link rel="icon"...> (optional)
+        # + inside CSS download url(...) (fonts/images)
+        # NOTE: Scripts are NOT downloaded - they were already removed above
+        self._download_and_rewrite_assets(session, soup, base_url=resp.url, assets_dir=assets_dir, timeout=timeout)
+
+        # IMPORTANT: Remove any scripts that might have been added during asset processing
+        # (shouldn't happen, but just in case)
+        for s in soup.find_all("script"):
+            s.decompose()
+
+        # To make links to other Marketplace pages work normally - rewrite relative href/src to absolute
+        self._rewrite_links_to_absolute_marketplace(soup, base_url=resp.url, keep_local_assets_dir=assets_dir.name)
+
+        # Ensure charset and DOCTYPE
+        self._ensure_html_metadata(soup)
+
+        # Convert to string and ensure DOCTYPE
+        out_html = str(soup)
+        if not out_html.strip().startswith('<!DOCTYPE'):
+            out_html = '<!DOCTYPE html>\n' + out_html
+
+        # Final check: ensure no scripts remain in the output
+        if '<script' in out_html.lower():
+            logger.warning(f"WARNING: Scripts still present in HTML after processing! Attempting to remove...")
+            # Use regex as last resort
+            import re
+            out_html = re.sub(r'<script[^>]*>.*?</script>', '', out_html, flags=re.DOTALL | re.IGNORECASE)
+            out_html = re.sub(r'<noscript[^>]*>.*?</noscript>', '', out_html, flags=re.DOTALL | re.IGNORECASE)
+
+        html_path.write_bytes(out_html.encode(encoding, errors="replace"))
+        logger.info(f"Saved HTML page with media assets: {html_path}")
+        return html_path, assets_dir
+
+    def _download_resource_simple(
+        self, session: requests.Session, abs_url: str, assets_dir: Path, timeout: int = 30
+    ) -> str:
+        """
+        Download a single resource and return relative path.
+
+        Args:
+            session: Requests session
+            abs_url: Absolute URL of resource
+            assets_dir: Directory to save assets
+            timeout: Request timeout
+
+        Returns:
+            Relative path from HTML: "<assets_dir_name>/<file>"
+        """
+        r = session.get(abs_url, timeout=timeout, stream=True, allow_redirects=True)
+        r.raise_for_status()
+
+        content_type = r.headers.get("Content-Type")
+        filename = _safe_filename_from_url(abs_url, content_type)
+        out_path = assets_dir / filename
+
+        with open(out_path, "wb") as f:
+            for chunk in r.iter_content(chunk_size=1024 * 64):
+                if chunk:
+                    f.write(chunk)
+
+        # Return relative path from HTML: "<assets_dir_name>/<file>"
+        return f"{assets_dir.name}/{filename}"
+
+    def _is_local_asset_path(self, value: str, local_dir_name: str) -> bool:
+        """
+        Check if path is a local asset path.
+
+        Args:
+            value: Path to check
+            local_dir_name: Name of local assets directory
+
+        Returns:
+            True if path is local asset
+        """
+        v = (value or "").strip()
+        return v.startswith(f"{local_dir_name}/") or v.startswith(f"./{local_dir_name}/")
+
+    def _rewrite_links_to_absolute_marketplace(
+        self, soup: BeautifulSoup, base_url: str, keep_local_assets_dir: Optional[str] = None
+    ) -> None:
+        """
+        Rewrite links so that:
+        - Relative links to marketplace become absolute (https://marketplace...)
+        - But local assets (assets_dir/...) are not touched
+
+        Args:
+            soup: BeautifulSoup object
+            base_url: Base URL for resolving relative links
+            keep_local_assets_dir: Name of local assets directory to preserve
+        """
+        attrs = [("a", "href"), ("img", "src"), ("link", "href"), ("source", "src")]
+
+        for tag_name, attr in attrs:
+            for tag in soup.find_all(tag_name):
+                val = tag.get(attr)
+                if not val:
+                    continue
+                val = str(val).strip()
+
+                if keep_local_assets_dir and self._is_local_asset_path(val, keep_local_assets_dir):
+                    continue
+
+                if val.startswith(("data:", "javascript:", "mailto:", "tel:", "#")):
+                    continue
+
+                if val.startswith("//"):
+                    tag[attr] = "https:" + val
+                    continue
+
+                if val.startswith("/"):
+                    tag[attr] = urljoin(MARKETPLACE_BASE, val)
+                    continue
+
+                # Relative to current page
+                if not val.lower().startswith(("http://", "https://")):
+                    tag[attr] = urljoin(base_url, val)
+
+    def _download_and_rewrite_assets(
+        self, session: requests.Session, soup: BeautifulSoup, base_url: str, assets_dir: Path, timeout: int
+    ) -> None:
+        """
+        Download and rewrite CSS and images.
+        NOTE: Scripts are NOT downloaded - they are removed to prevent SPA routing issues.
+
+        Args:
+            session: Requests session
+            soup: BeautifulSoup object
+            base_url: Base URL for resolving relative links
+            assets_dir: Directory to save assets
+            timeout: Request timeout
+        """
+        # IMPORTANT: Do NOT download scripts - they are already removed and should stay removed
+        
+        # --- CSS ---
+        for link in soup.find_all("link"):
+            rel = link.get("rel") or []
+            rel_str = " ".join([r.lower() for r in rel]) if isinstance(rel, list) else str(rel).lower()
+
+            href = link.get("href")
+            if not href:
+                continue
+
+            href = str(href).strip()
+            if href.startswith(("data:", "javascript:")):
+                continue
+
+            is_css = "stylesheet" in rel_str
+            is_icon = ("icon" in rel_str) or ("shortcut icon" in rel_str)
+
+            if not (is_css or is_icon):
+                continue
+
+            abs_url = urljoin(base_url, href)
+            try:
+                content, content_type = self._http_get_bytes(session, abs_url, timeout)
+            except Exception as e:
+                logger.debug(f"Failed to download {abs_url}: {str(e)}")
+                continue
+
+            # Save
+            local_name = _safe_filename_from_url(abs_url, content_type)
+            local_path = assets_dir / local_name
+            local_path.write_bytes(content)
+
+            # If it's CSS - rewrite url(...) inside and download resources
+            if is_css:
+                try:
+                    css_text = content.decode("utf-8", errors="replace")
+                    css_text = self._localize_css_urls(
+                        session, css_text, css_base_url=abs_url, assets_dir=assets_dir, timeout=timeout
+                    )
+                    local_path.write_text(css_text, encoding="utf-8", errors="replace")
+                except Exception as e:
+                    logger.debug(f"Failed to process CSS {abs_url}: {str(e)}")
+
+            # Rewrite link
+            link["href"] = f"{assets_dir.name}/{local_name}"
+
+        # --- IMG ---
+        for img in soup.find_all("img"):
+            src = img.get("src")
+            if not src:
+                continue
+            src = str(src).strip()
+
+            if src.startswith(("data:", "javascript:")):
+                continue
+
+            abs_url = urljoin(base_url, src)
+            try:
+                content, content_type = self._http_get_bytes(session, abs_url, timeout)
+            except Exception as e:
+                logger.debug(f"Failed to download image {abs_url}: {str(e)}")
+                continue
+
+            local_name = _safe_filename_from_url(abs_url, content_type)
+            (assets_dir / local_name).write_bytes(content)
+
+            img["src"] = f"{assets_dir.name}/{local_name}"
+
+    def _localize_css_urls(
+        self, session: requests.Session, css_text: str, css_base_url: str, assets_dir: Path, timeout: int
+    ) -> str:
+        """
+        Inside CSS find url(...) and download corresponding resources (fonts/images),
+        rewriting them to local paths.
+
+        Args:
+            session: Requests session
+            css_text: CSS content
+            css_base_url: Base URL for CSS file (for resolving relative URLs)
+            assets_dir: Directory to save assets
+            timeout: Request timeout
+
+        Returns:
+            CSS text with rewritten URLs
+        """
+        # url('...') / url("...") / url(...)
+        pattern = re.compile(r"url\(\s*(['\"]?)([^'\"\)]+)\1\s*\)", re.IGNORECASE)
+
+        def repl(m: re.Match) -> str:
+            raw = m.group(2).strip()
+            if raw.startswith(("data:", "javascript:", "#")):
+                return m.group(0)
+
+            abs_url = urljoin(css_base_url, raw)
+            try:
+                content, content_type = self._http_get_bytes(session, abs_url, timeout)
+            except Exception:
+                return m.group(0)
+
+            local_name = _safe_filename_from_url(abs_url, content_type)
+            (assets_dir / local_name).write_bytes(content)
+            return f"url('{assets_dir.name}/{local_name}')"
+
+        return pattern.sub(repl, css_text)
+
+    def _http_get_bytes(self, session: requests.Session, url: str, timeout: int) -> Tuple[bytes, str]:
+        """
+        Get bytes and content type from URL.
+
+        Args:
+            session: Requests session
+            url: URL to fetch
+            timeout: Request timeout
+
+        Returns:
+            Tuple of (content_bytes, content_type)
+        """
+        r = session.get(url, timeout=timeout, allow_redirects=True, stream=True)
+        r.raise_for_status()
+        content_type = r.headers.get("Content-Type", "")
+        return r.content, content_type
+
+    def _ensure_html_metadata(self, soup: BeautifulSoup) -> None:
+        """
+        Ensure HTML has charset meta tag and DOCTYPE.
+
+        Args:
+            soup: BeautifulSoup object
+        """
+        # Ensure charset meta tag
+        if soup.head:
+            charset_tag = soup.head.find('meta', attrs={'charset': True})
+            if not charset_tag:
+                charset_tag = soup.new_tag('meta', charset='UTF-8')
+                soup.head.insert(0, charset_tag)
+            else:
+                charset_tag['charset'] = 'UTF-8'
+        else:
+            if not soup.find('head'):
+                head = soup.new_tag('head')
+                if soup.html:
+                    soup.html.insert(0, head)
+                else:
+                    soup.insert(0, head)
+            charset_tag = soup.new_tag('meta', charset='UTF-8')
+            soup.head.insert(0, charset_tag)
+
+        # DOCTYPE will be added when converting to string
+
+    def save_marketplace_plugin_page_static(
+        self,
+        download_url: str,
+        save_html_path: Union[str, os.PathLike],
+        encoding: str = "utf-8",
+        download_media: bool = False,
+        addon_key: Optional[str] = None,
+        timeout: int = 30,
+    ) -> Tuple[Path, Optional[Path]]:
+        """
+        Create a static HTML snapshot of plugin page using Marketplace REST API.
+        This generates a standalone HTML file that works offline (file://) without SPA dependencies.
+
+        This is the recommended method for offline viewing, as it doesn't rely on
+        Marketplace's JavaScript SPA which fails when opened via file:// protocol.
+
+        Args:
+            download_url: Link from JSON (href can be relative "/apps/...")
+            save_html_path: Where to save HTML
+            encoding: Encoding to write HTML to disk
+            download_media: Download images (logo and description images) locally
+            addon_key: Addon key (if not provided, will try to extract from HTML)
+            timeout: Request timeout in seconds
+
+        Returns:
+            Tuple of (path_to_html, path_to_assets_dir_or_None)
+        """
+        page_url = _normalize_marketplace_url(str(download_url).strip())
+        html_path = Path(save_html_path).expanduser().resolve()
+        html_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Use existing session (already has auth if configured)
+        session = self.session
+        session.headers.update(
+            {
+                "User-Agent": "Mozilla/5.0 (offline-static-snapshot)",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            }
+        )
+
+        # 1) If addon_key not provided, try to extract from HTML page
+        if not addon_key:
+            page_resp = session.get(page_url, timeout=timeout, allow_redirects=True)
+            page_resp.raise_for_status()
+            # Ensure UTF-8 encoding
+            if page_resp.encoding is None or page_resp.encoding.lower() not in ['utf-8', 'utf8']:
+                page_resp.encoding = 'utf-8'
+            page_html = page_resp.text
+            addon_key = self._extract_addon_key_from_marketplace_html(page_html)
+
+        if not addon_key:
+            raise ValueError(
+                "Could not determine addon_key from HTML. "
+                "Please provide addon_key explicitly (from JSON field 'addon_key')."
+            )
+
+        # 2) Fetch data via Marketplace REST API
+        api_url = f"{API_BASE}/addons/{addon_key}"
+        api_resp = session.get(
+            api_url,
+            timeout=timeout,
+            allow_redirects=True,
+            headers={"Accept": "application/json"}
+        )
+        api_resp.raise_for_status()
+        # Ensure UTF-8 encoding
+        if api_resp.encoding is None or api_resp.encoding.lower() not in ['utf-8', 'utf8']:
+            api_resp.encoding = 'utf-8'
+        data = api_resp.json()
+
+        # 3) Prepare assets
+        assets_dir: Optional[Path] = None
+        if download_media:
+            assets_dir = html_path.parent / f"{html_path.stem}_assets"
+            assets_dir.mkdir(parents=True, exist_ok=True)
+
+        # 4) Extract fields (API structure may vary - do safely)
+        name = self._deep_get(data, ["name"]) or addon_key
+        summary = self._deep_get(data, ["summary"]) or self._deep_get(data, ["tagline"]) or ""
+        vendor_name = (
+            self._deep_get(data, ["vendor", "name"])
+            or self._deep_get(data, ["vendor", "company", "name"])
+            or ""
+        )
+        homepage = self._deep_get(data, ["vendor", "links", "homepage"]) or ""
+
+        # Description in API is often stored as HTML (or as "description"/"text")
+        description_html = (
+            self._deep_get(data, ["description"])
+            or self._deep_get(data, ["details", "description"])
+            or self._deep_get(data, ["text"])
+            or ""
+        )
+
+        # Sometimes description comes as plain text, not HTML - escape carefully
+        if description_html and ("<" not in description_html and ">" not in description_html):
+            description_html = "<p>" + escape(description_html).replace("\n", "<br>") + "</p>"
+
+        # Logo: in API it can be in different places. Try several variants.
+        logo_url = (
+            self._deep_get(data, ["_links", "logo", "href"])
+            or self._deep_get(data, ["_links", "icon", "href"])
+            or self._deep_get(data, ["logo", "href"])
+            or ""
+        )
+        if logo_url:
+            logo_url = urljoin(MARKETPLACE_BASE, logo_url)
+
+        # 5) If downloading media: logo + images from description
+        local_logo_rel = ""
+        if download_media and assets_dir and logo_url:
+            try:
+                local_logo_rel = self._download_binary_static(session, logo_url, assets_dir, timeout)
+            except Exception as e:
+                logger.warning(f"Failed to download logo {logo_url}: {str(e)}")
+                local_logo_rel = logo_url  # Fallback to original URL
+
+        if download_media and assets_dir and description_html:
+            description_html = self._localize_images_in_html(session, description_html, assets_dir, timeout)
+
+        # 6) Build final static HTML
+        final_html = self._render_static_html(
+            name=name,
+            addon_key=addon_key,
+            vendor=vendor_name,
+            summary=summary,
+            homepage=homepage,
+            source_url=page_url,
+            logo_rel=local_logo_rel if local_logo_rel else logo_url,
+            description_html=description_html,
+        )
+
+        html_path.write_bytes(final_html.encode(encoding, errors="replace"))
+        logger.info(f"Saved static HTML snapshot: {html_path}")
+        return html_path, assets_dir
+
+    def _extract_addon_key_from_marketplace_html(self, page_html: str) -> Optional[str]:
+        """
+        Try to extract addonKey from HTML. This is heuristic.
+        If you already have addon_key in JSON, it's better to pass it explicitly.
+
+        Args:
+            page_html: HTML content of marketplace page
+
+        Returns:
+            Addon key or None if not found
+        """
+        if not page_html:
+            return None
+
+        # Common key patterns in JSON within page
+        patterns = [
+            r'"addonKey"\s*:\s*"([^"]+)"',
+            r'"addon_key"\s*:\s*"([^"]+)"',
+            r'"appKey"\s*:\s*"([^"]+)"',
+            r'"pluginKey"\s*:\s*"([^"]+)"',
+        ]
+        for p in patterns:
+            m = re.search(p, page_html)
+            if m:
+                return m.group(1)
+
+        # Sometimes appears as "addon-com.xxx"
+        m = re.search(r'addon-([a-zA-Z0-9_.-]+)', page_html)
+        if m:
+            return m.group(1)
+
+        return None
+
+    def _deep_get(self, obj: Dict, path: List[str]) -> Optional[str]:
+        """
+        Safely get nested dictionary value.
+
+        Args:
+            obj: Dictionary to search
+            path: List of keys to traverse
+
+        Returns:
+            Value or None if not found
+        """
+        cur = obj
+        for key in path:
+            if not isinstance(cur, dict):
+                return None
+            cur = cur.get(key)
+        return cur
+
+    def _download_binary_static(self, session: requests.Session, url: str, assets_dir: Path, timeout: int) -> str:
+        """
+        Download binary file and return relative path.
+
+        Args:
+            session: Requests session
+            url: URL to download
+            assets_dir: Directory to save file
+            timeout: Request timeout
+
+        Returns:
+            Relative path from HTML: "<assets_dir_name>/<file>"
+        """
+        r = session.get(url, timeout=timeout, allow_redirects=True, stream=True)
+        r.raise_for_status()
+
+        # Filename from URL tail
+        name = re.sub(r"[^a-zA-Z0-9._-]", "_", url.split("?")[0].split("/")[-1] or "asset")
+        out = assets_dir / name
+
+        with open(out, "wb") as f:
+            for chunk in r.iter_content(chunk_size=64 * 1024):
+                if chunk:
+                    f.write(chunk)
+
+        return f"{assets_dir.name}/{out.name}"
+
+    def _localize_images_in_html(
+        self, session: requests.Session, html_fragment: str, assets_dir: Path, timeout: int
+    ) -> str:
+        """
+        Find images in HTML and download them, rewriting src to local paths.
+
+        Args:
+            session: Requests session
+            html_fragment: HTML content with images
+            assets_dir: Directory to save images
+            timeout: Request timeout
+
+        Returns:
+            HTML with rewritten image src attributes
+        """
+        soup = BeautifulSoup(html_fragment, "lxml")
+
+        for img in soup.find_all("img"):
+            src = img.get("src")
+            if not src:
+                continue
+
+            src = src.strip()
+            if src.startswith("data:"):
+                continue
+
+            abs_url = urljoin(MARKETPLACE_BASE, src) if src.startswith("/") else src
+            try:
+                rel = self._download_binary_static(session, abs_url, assets_dir, timeout)
+                img["src"] = rel.replace("\\", "/")
+            except Exception as e:
+                # If download failed, leave as is
+                logger.debug(f"Failed to download image {abs_url}: {str(e)}")
+                pass
+
+        return str(soup)
+
+    def _render_static_html(
+        self,
+        name: str,
+        addon_key: str,
+        vendor: str,
+        summary: str,
+        homepage: str,
+        source_url: str,
+        logo_rel: str,
+        description_html: str,
+    ) -> str:
+        """
+        Render static HTML template for plugin page.
+
+        Args:
+            name: Plugin name
+            addon_key: Addon key
+            vendor: Vendor name
+            summary: Plugin summary
+            homepage: Vendor homepage URL
+            source_url: Original marketplace URL
+            logo_rel: Logo relative path or URL
+            description_html: HTML description content
+
+        Returns:
+            Complete HTML document as string
+        """
+        vendor_line = (
+            f"<div class='meta'><b>Vendor:</b> {escape(vendor)}</div>" if vendor else ""
+        )
+        homepage_line = (
+            f"<div class='meta'><b>Vendor site:</b> <a href='{escape(homepage)}' target='_blank'>{escape(homepage)}</a></div>"
+            if homepage else ""
+        )
+        logo_block = (
+            f"<img class='logo' src='{escape(logo_rel)}' alt='logo'>" if logo_rel else ""
+        )
+
+        return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{escape(name)} — Marketplace snapshot</title>
+  <style>
+    body {{ font-family: Arial, sans-serif; margin: 24px; color: #172B4D; background: #F4F5F7; }}
+    .card {{ max-width: 1100px; margin: 0 auto; background: white; padding: 24px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }}
+    .header {{ display:flex; gap:16px; align-items:center; margin-bottom: 24px; }}
+    .logo {{ width:72px; height:72px; object-fit:contain; border-radius:12px; border:1px solid #DFE1E6; background:#fff; padding: 4px; }}
+    h1 {{ margin: 0; font-size: 26px; color: #172B4D; }}
+    .sub {{ margin-top: 6px; color:#42526E; font-size: 14px; }}
+    .meta {{ margin-top: 6px; color:#42526E; font-size: 13px; }}
+    .src {{ margin-top: 10px; font-size: 13px; color:#6B778C; }}
+    .desc {{ margin-top: 18px; padding-top: 16px; border-top:1px solid #DFE1E6; }}
+    .desc img {{ max-width: 100%; height: auto; border-radius: 4px; }}
+    a {{ color:#0C66E4; text-decoration:none; }}
+    a:hover {{ text-decoration:underline; }}
+    code {{ background:#F4F5F7; padding:2px 6px; border-radius:4px; font-size: 12px; }}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="header">
+      {logo_block}
+      <div>
+        <h1>{escape(name)}</h1>
+        <div class="sub">{escape(summary)}</div>
+        <div class="meta"><b>Addon key:</b> <code>{escape(addon_key)}</code></div>
+        {vendor_line}
+        {homepage_line}
+        <div class="src">Source: <a href="{escape(source_url)}" target="_blank">{escape(source_url)}</a></div>
+      </div>
+    </div>
+
+    <div class="desc">
+      {description_html or "<i>Description not available in API data</i>"}
+    </div>
+  </div>
+</body>
+</html>
+"""
 

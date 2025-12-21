@@ -64,46 +64,39 @@ def main():
         
         # Get app from database to get marketplace_url
         app = store.get_app_by_key(args.addon_key)
-        marketplace_url = app.get('marketplace_url') if app else None
+        marketplace_url = None
+        if app:
+            # Handle marketplace_url - can be string or dict
+            marketplace_url_raw = app.get('marketplace_url')
+            if marketplace_url_raw:
+                if isinstance(marketplace_url_raw, dict):
+                    marketplace_url = marketplace_url_raw.get('href', '')
+                elif isinstance(marketplace_url_raw, str):
+                    marketplace_url = marketplace_url_raw.strip()
         
-        if marketplace_url and not args.use_api:
-            # Download full HTML page
-            print(f"Using full HTML page: {marketplace_url}")
-            html_path = downloader.download_full_marketplace_page(
-                marketplace_url,
-                args.addon_key,
-                download_assets=args.download_media
-            )
-            if html_path:
-                print(f"[OK] Full page saved: {html_path}")
-            else:
-                print(f"[ERROR] Failed to download full page, trying API...")
-                json_path, html_path = downloader.download_description(
-                    args.addon_key,
-                    download_media=args.download_media,
-                    marketplace_url=marketplace_url
-                )
-                if json_path and html_path:
-                    print(f"[OK] Description saved:")
-                    print(f"  JSON: {json_path}")
-                    print(f"  HTML: {html_path}")
-                else:
-                    print(f"[ERROR] Failed to download description for {args.addon_key}")
-                    sys.exit(1)
-        else:
-            # Use API-based description
-            json_path, html_path = downloader.download_description(
-                args.addon_key,
-                download_media=args.download_media,
-                marketplace_url=marketplace_url
-            )
-            if json_path and html_path:
-                print(f"[OK] Description saved:")
+        # If marketplace_url is empty, construct it
+        if not marketplace_url:
+            marketplace_url = f"https://marketplace.atlassian.com/apps/{args.addon_key}?hosting=datacenter&tab=overview"
+            print(f"Constructed marketplace URL: {marketplace_url}")
+        
+        # Always use download_description - it handles both full_page and API
+        # If marketplace_url is provided and not use_api, it will download full_page + API
+        # If use_api is True, it will only download API description
+        json_path, html_path = downloader.download_description(
+            args.addon_key,
+            download_media=args.download_media,
+            marketplace_url=marketplace_url if not args.use_api else None
+        )
+        
+        if json_path or html_path:
+            print(f"[OK] Description saved:")
+            if json_path:
                 print(f"  JSON: {json_path}")
+            if html_path:
                 print(f"  HTML: {html_path}")
-            else:
-                print(f"[ERROR] Failed to download description for {args.addon_key}")
-                sys.exit(1)
+        else:
+            print(f"[ERROR] Failed to download description for {args.addon_key}")
+            sys.exit(1)
     else:
         # Download for all apps
         print(f"\nDownloading descriptions for all apps...")

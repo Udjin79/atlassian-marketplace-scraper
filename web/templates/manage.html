@@ -264,6 +264,50 @@
     </div>
 </div>
 
+<!-- Credentials Section -->
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header bg-warning text-dark">
+                <h5 class="mb-0"><i class="bi bi-key"></i> Marketplace API Credentials</h5>
+            </div>
+            <div class="card-body">
+                <div class="alert alert-info">
+                    <i class="bi bi-info-circle"></i> 
+                    <strong>Note:</strong> Credentials are stored in <code>.credentials.json</code> (not in .env file) 
+                    so they won't be committed to git. This allows you to push the code to master without exposing credentials.
+                </div>
+                <form id="credentials-form">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="credentials_username" class="form-label">Username (Email)</label>
+                                <input type="email" class="form-control" id="credentials_username" 
+                                       value="{{ credentials.username }}" 
+                                       placeholder="your-email@example.com">
+                                <small class="text-muted">Your Atlassian account email</small>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="credentials_api_token" class="form-label">API Token</label>
+                                <input type="password" class="form-control" id="credentials_api_token" 
+                                       value="{{ credentials.api_token }}" 
+                                       placeholder="Enter API token">
+                                <small class="text-muted">API token from Atlassian (stored securely)</small>
+                            </div>
+                        </div>
+                    </div>
+                    <button type="button" class="btn btn-warning" onclick="saveCredentials()">
+                        <i class="bi bi-save"></i> Save Credentials
+                    </button>
+                    <div id="credentials-message" class="mt-2"></div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Settings Section -->
 <div class="row mt-4">
     <div class="col-12">
@@ -350,12 +394,110 @@
                 <h5 class="mb-0"><i class="bi bi-clock-history"></i> Task Status</h5>
             </div>
             <div class="card-body">
-                <div id="task-status-container">
-                    <p class="text-muted">Loading task status...</p>
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <div>
+                        <button class="btn btn-sm btn-outline-secondary" onclick="refreshTaskStatus()">
+                            <i class="bi bi-arrow-clockwise"></i> Refresh
+                        </button>
+                        <button class="btn btn-sm btn-outline-danger" onclick="clearCompletedTasks()" title="Clear all completed, failed, and cancelled tasks">
+                            <i class="bi bi-trash"></i> Clear Completed
+                        </button>
+                    </div>
+                    <small class="text-muted" id="last-update-time">Last update: --</small>
                 </div>
-                <button class="btn btn-sm btn-outline-secondary" onclick="refreshTaskStatus()">
-                    <i class="bi bi-arrow-clockwise"></i> Refresh
+                
+                <!-- Tabs for task statuses -->
+                <ul class="nav nav-tabs mb-3" id="task-status-tabs" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" id="all-tab" data-bs-toggle="tab" data-bs-target="#all-tasks" type="button" role="tab">
+                            All
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="running-tab" data-bs-toggle="tab" data-bs-target="#running-tasks" type="button" role="tab">
+                            Running
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="completed-tab" data-bs-toggle="tab" data-bs-target="#completed-tasks" type="button" role="tab">
+                            Completed
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="failed-tab" data-bs-toggle="tab" data-bs-target="#failed-tasks" type="button" role="tab">
+                            Failed
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="cancelled-tab" data-bs-toggle="tab" data-bs-target="#cancelled-tasks" type="button" role="tab">
+                            Cancelled
+                        </button>
+                    </li>
+                </ul>
+                
+                <!-- Tab content -->
+                <div class="tab-content" id="task-status-tab-content">
+                    <div class="tab-pane fade show active" id="all-tasks" role="tabpanel">
+                        <div id="task-status-container-all" style="min-height: 200px;">
+                            <p class="text-muted">Loading task status...</p>
+                        </div>
+                    </div>
+                    <div class="tab-pane fade" id="running-tasks" role="tabpanel">
+                        <div id="task-status-container-running" style="min-height: 200px;">
+                            <p class="text-muted">Loading...</p>
+                        </div>
+                    </div>
+                    <div class="tab-pane fade" id="completed-tasks" role="tabpanel">
+                        <div id="task-status-container-completed" style="min-height: 200px;">
+                            <p class="text-muted">Loading...</p>
+                        </div>
+                    </div>
+                    <div class="tab-pane fade" id="failed-tasks" role="tabpanel">
+                        <div id="task-status-container-failed" style="min-height: 200px;">
+                            <p class="text-muted">Loading...</p>
+                        </div>
+                    </div>
+                    <div class="tab-pane fade" id="cancelled-tasks" role="tabpanel">
+                        <div id="task-status-container-cancelled" style="min-height: 200px;">
+                            <p class="text-muted">Loading...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Logs Section -->
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header bg-info text-white">
+                <h5 class="mb-0"><i class="bi bi-file-text"></i> View Logs</h5>
+            </div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label for="log-file-select" class="form-label">Select Log File:</label>
+                    <select class="form-select" id="log-file-select" onchange="loadLogFile()">
+                        <option value="">-- Select a log file --</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label for="log-lines" class="form-label">Number of lines:</label>
+                    <input type="number" class="form-control" id="log-lines" value="500" min="100" max="5000" step="100">
+                </div>
+                <button class="btn btn-info" onclick="loadLogFile()">
+                    <i class="bi bi-arrow-clockwise"></i> Load Log
                 </button>
+                <div id="log-content-container" class="mt-3" style="display: none;">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <small class="text-muted" id="log-info"></small>
+                        <button class="btn btn-sm btn-outline-secondary" onclick="copyLogContent()">
+                            <i class="bi bi-clipboard"></i> Copy
+                        </button>
+                    </div>
+                    <pre id="log-content" class="bg-dark text-light p-3 rounded" style="max-height: 500px; overflow-y: auto; font-size: 0.85rem;"></pre>
+                </div>
             </div>
         </div>
     </div>
@@ -483,58 +625,7 @@ function startDownloadDescriptions() {
     });
 }
 
-function refreshTaskStatus() {
-    const container = document.getElementById('task-status-container');
-    container.innerHTML = '<div class="spinner-border spinner-border-sm me-2"></div>Loading...';
-    
-    fetch('/api/tasks')
-    .then(r => r.json())
-    .then(data => {
-        if (data.success && Object.keys(data.tasks).length > 0) {
-            let html = '<div class="table-responsive"><table class="table table-sm"><thead><tr><th>Task ID</th><th>Script</th><th>Status</th><th>Started</th><th>Message</th></tr></thead><tbody>';
-            
-            // Sort by started_at descending
-            const tasks = Object.entries(data.tasks)
-                .sort((a, b) => (b[1].started_at || '').localeCompare(a[1].started_at || ''));
-            
-            tasks.slice(0, 10).forEach(([taskId, task]) => {
-                const statusClass = {
-                    'running': 'warning',
-                    'completed': 'success',
-                    'failed': 'danger'
-                }[task.status] || 'secondary';
-                
-                let messageCell = task.message || 'N/A';
-                if (task.status === 'failed' && task.error) {
-                    const errorPreview = task.error.length > 100 ? task.error.substring(0, 100) + '...' : task.error;
-                    messageCell = `<div>
-                        <strong>${task.message || 'Failed'}</strong>
-                        <br><small class="text-muted">${escapeHtml(errorPreview)}</small>
-                        <button class="btn btn-sm btn-outline-danger ms-2" onclick="showTaskError('${taskId}')">
-                            <i class="bi bi-exclamation-triangle"></i> Details
-                        </button>
-                    </div>`;
-                }
-                
-                html += `<tr>
-                    <td><code>${taskId}</code></td>
-                    <td>${task.script || 'N/A'}</td>
-                    <td><span class="badge bg-${statusClass}">${task.status || 'unknown'}</span></td>
-                    <td>${task.started_at ? new Date(task.started_at).toLocaleString() : 'N/A'}</td>
-                    <td>${messageCell}</td>
-                </tr>`;
-            });
-            
-            html += '</tbody></table></div>';
-            container.innerHTML = html;
-        } else {
-            container.innerHTML = '<p class="text-muted">No tasks found</p>';
-        }
-    })
-    .catch(e => {
-        container.innerHTML = `<div class="alert alert-danger">Error loading tasks: ${e.message}</div>`;
-    });
-}
+// Old refreshTaskStatus function removed - using new version with tabs and logs below
 
 function saveSettings() {
     const messageDiv = document.getElementById('settings-message');
@@ -811,11 +902,332 @@ function showTaskError(taskId) {
     });
 }
 
+// Credentials functions
+function saveCredentials() {
+    const username = document.getElementById('credentials_username').value.trim();
+    const apiToken = document.getElementById('credentials_api_token').value.trim();
+    const messageDiv = document.getElementById('credentials-message');
+    
+    messageDiv.innerHTML = '<div class="spinner-border spinner-border-sm me-2"></div>Saving...';
+    
+    fetch('/api/credentials', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({username: username, api_token: apiToken})
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            messageDiv.innerHTML = '<div class="alert alert-success"><i class="bi bi-check-circle"></i> Credentials saved successfully</div>';
+        } else {
+            messageDiv.innerHTML = `<div class="alert alert-danger"><i class="bi bi-exclamation-triangle"></i> ${data.error || 'Failed to save credentials'}</div>`;
+        }
+    })
+    .catch(e => {
+        messageDiv.innerHTML = `<div class="alert alert-danger">Error: ${e.message}</div>`;
+    });
+}
+
+// Logs functions
+function loadLogFiles() {
+    fetch('/api/logs')
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            const select = document.getElementById('log-file-select');
+            select.innerHTML = '<option value="">-- Select a log file --</option>';
+            data.logs.forEach(log => {
+                const sizeKB = (log.size / 1024).toFixed(2);
+                const option = document.createElement('option');
+                option.value = log.name;
+                option.textContent = `${log.name} (${sizeKB} KB)`;
+                select.appendChild(option);
+            });
+        }
+    })
+    .catch(e => console.error('Error loading logs:', e));
+}
+
+function loadLogFile() {
+    const logName = document.getElementById('log-file-select').value;
+    const lines = document.getElementById('log-lines').value;
+    const container = document.getElementById('log-content-container');
+    const contentDiv = document.getElementById('log-content');
+    const infoDiv = document.getElementById('log-info');
+    
+    if (!logName) {
+        container.style.display = 'none';
+        return;
+    }
+    
+    contentDiv.textContent = 'Loading...';
+    container.style.display = 'block';
+    
+    fetch(`/api/logs/${logName}?lines=${lines}`)
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            contentDiv.textContent = data.content;
+            infoDiv.textContent = `Showing last ${data.showing} of ${data.total_lines} lines`;
+        } else {
+            contentDiv.textContent = `Error: ${data.error}`;
+        }
+    })
+    .catch(e => {
+        contentDiv.textContent = `Error: ${e.message}`;
+    });
+}
+
+function copyLogContent() {
+    const content = document.getElementById('log-content').textContent;
+    navigator.clipboard.writeText(content).then(() => {
+        alert('Log content copied to clipboard');
+    }).catch(e => {
+        alert('Failed to copy: ' + e.message);
+    });
+}
+
+// Cancel task function
+function cancelTask(taskId) {
+    if (!confirm(`Are you sure you want to cancel task ${taskId.substring(0, 20)}...?`)) {
+        return;
+    }
+    
+    fetch(`/api/tasks/${taskId}/cancel`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'}
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            // Refresh task status after a short delay
+            setTimeout(() => {
+                refreshTaskStatus();
+            }, 1000);
+        } else {
+            alert(`Failed to cancel task: ${data.error || 'Unknown error'}`);
+        }
+    })
+    .catch(e => {
+        alert(`Error cancelling task: ${e.message}`);
+    });
+}
+
+// Task log cache
+const taskLogCache = {};
+
+// Task Status function
+function refreshTaskStatus() {
+    const scrollY = window.scrollY;
+    
+    fetch('/api/tasks')
+    .then(r => r.json())
+    .then(data => {
+        if (data.success && data.tasks) {
+            const tasks = Object.entries(data.tasks).sort((a, b) => {
+                const timeA = new Date(a[1].started_at || 0).getTime();
+                const timeB = new Date(b[1].started_at || 0).getTime();
+                return timeB - timeA; // Newest first
+            });
+            
+            // Group tasks by status
+            const tasksByStatus = {
+                'all': tasks,
+                'running': tasks.filter(([_, task]) => task.status === 'running'),
+                'completed': tasks.filter(([_, task]) => task.status === 'completed'),
+                'failed': tasks.filter(([_, task]) => task.status === 'failed'),
+                'cancelled': tasks.filter(([_, task]) => task.status === 'cancelled')
+            };
+            
+            // Render each tab
+            Object.keys(tasksByStatus).forEach(status => {
+                const container = document.getElementById(`task-status-container-${status}`);
+                renderTasksTable(container, tasksByStatus[status], status === 'running');
+            });
+            
+            // Update last update time
+            const now = new Date();
+            document.getElementById('last-update-time').textContent = 
+                `Last update: ${now.toLocaleTimeString()}`;
+            
+            // Load logs for running tasks
+            if (tasksByStatus.running.length > 0) {
+                loadTaskLogs(tasksByStatus.running.map(([id]) => id));
+            }
+            
+            // Restore scroll position
+            requestAnimationFrame(() => {
+                window.scrollTo(0, scrollY);
+            });
+        } else {
+            // Clear all containers
+            ['all', 'running', 'completed', 'failed', 'cancelled'].forEach(status => {
+                const container = document.getElementById(`task-status-container-${status}`);
+                container.innerHTML = '<p class="text-muted">No tasks found.</p>';
+            });
+            window.scrollTo(0, scrollY);
+        }
+    })
+    .catch(e => {
+        ['all', 'running', 'completed', 'failed', 'cancelled'].forEach(status => {
+            const container = document.getElementById(`task-status-container-${status}`);
+            container.innerHTML = `<p class="text-danger">Error loading tasks: ${e.message}</p>`;
+        });
+        window.scrollTo(0, scrollY);
+    });
+}
+
+function renderTasksTable(container, tasks, loadLogs = false) {
+    if (tasks.length === 0) {
+        container.innerHTML = '<p class="text-muted">No tasks in this category.</p>';
+        return;
+    }
+    
+    let html = '<div class="table-responsive"><table class="table table-hover table-sm">';
+    html += '<thead><tr><th>Task ID</th><th>Script</th><th>Status</th><th>Current Action</th><th>Last Log Line</th><th>Progress</th><th>Started</th><th>Actions</th></tr></thead><tbody>';
+    
+    tasks.forEach(([taskId, task]) => {
+        const statusBadge = task.status === 'completed' ? 'bg-success' :
+                           task.status === 'failed' ? 'bg-danger' :
+                           task.status === 'cancelled' ? 'bg-warning' :
+                           task.status === 'running' ? 'bg-primary' : 'bg-secondary';
+        const progress = task.progress || 0;
+        const currentAction = task.current_action || task.message || 'N/A';
+        const started = task.started_at ? new Date(task.started_at).toLocaleString() : 'N/A';
+        
+        // Get cached log line or show placeholder
+        const cachedLog = taskLogCache[taskId];
+        let logLine = 'N/A';
+        let logTitle = '';
+        
+        if (cachedLog && cachedLog.log_line) {
+            logLine = escapeHtml(cachedLog.log_line).substring(0, 150);
+            logTitle = escapeHtml(cachedLog.log_line);
+        } else if (task.status === 'running') {
+            logLine = '<em class="text-muted">Loading log...</em>';
+        }
+        
+        html += `<tr>
+            <td><code>${taskId.substring(0, 20)}...</code></td>
+            <td>${task.script || 'N/A'}</td>
+            <td><span class="badge ${statusBadge}">${task.status || 'unknown'}</span></td>
+            <td><small class="text-muted">${escapeHtml(currentAction)}</small></td>
+            <td><small class="text-muted" id="log-${taskId}" style="font-family: monospace; font-size: 0.85em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 400px; display: inline-block;" title="${logTitle}">${logLine}</small></td>
+            <td>
+                <div class="progress" style="height: 20px; width: 100px;">
+                    <div class="progress-bar ${task.status === 'running' ? 'progress-bar-striped progress-bar-animated' : ''}" 
+                         role="progressbar" style="width: ${progress}%">${progress}%</div>
+                </div>
+            </td>
+            <td><small>${started}</small></td>
+            <td>
+                ${task.status === 'running' ? `<button class="btn btn-sm btn-outline-warning" onclick="cancelTask('${taskId}')" title="Cancel this task">
+                    <i class="bi bi-x-circle"></i> Cancel
+                </button>` : ''}
+                ${task.status === 'failed' ? `<button class="btn btn-sm btn-outline-danger" onclick="showTaskError('${taskId}')">View Error</button>` : ''}
+            </td>
+        </tr>`;
+    });
+    
+    html += '</tbody></table></div>';
+    container.innerHTML = html;
+}
+
+function loadTaskLogs(taskIds) {
+    taskIds.forEach(taskId => {
+        fetch(`/api/tasks/${taskId}/last-log`)
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                // Update cache
+                taskLogCache[taskId] = {
+                    log_line: data.log_line,
+                    timestamp: data.timestamp
+                };
+                
+                // Update UI
+                const logElement = document.getElementById(`log-${taskId}`);
+                if (logElement) {
+                    if (data.log_line) {
+                        const logText = escapeHtml(data.log_line).substring(0, 150);
+                        logElement.textContent = logText;
+                        logElement.title = escapeHtml(data.log_line); // Full text on hover
+                    } else {
+                        logElement.innerHTML = '<em class="text-muted">No log yet</em>';
+                        logElement.title = '';
+                    }
+                }
+            }
+        })
+        .catch(e => {
+            console.error(`Error loading log for ${taskId}:`, e);
+        });
+    });
+}
+
+function clearCompletedTasks() {
+    if (!confirm('Are you sure you want to clear all completed, failed, and cancelled tasks?')) {
+        return;
+    }
+    
+    fetch('/api/tasks/clear-completed', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'}
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            // Clear log cache for removed tasks
+            Object.keys(taskLogCache).forEach(taskId => {
+                delete taskLogCache[taskId];
+            });
+            
+            // Refresh task status
+            setTimeout(() => {
+                refreshTaskStatus();
+            }, 500);
+        } else {
+            alert(`Failed to clear tasks: ${data.error || 'Unknown error'}`);
+        }
+    })
+    .catch(e => {
+        alert(`Error clearing tasks: ${e.message}`);
+    });
+}
+
 // Auto-refresh task status every 5 seconds if page is visible
 let refreshInterval;
+let logRefreshInterval;
 document.addEventListener('DOMContentLoaded', function() {
     refreshTaskStatus();
+    loadLogFiles();
+    
+    // Refresh task status every 5 seconds
     refreshInterval = setInterval(refreshTaskStatus, 5000);
+    
+    // Refresh logs for running tasks every 5 seconds
+    logRefreshInterval = setInterval(() => {
+        fetch('/api/tasks')
+        .then(r => r.json())
+        .then(data => {
+            if (data.success && data.tasks) {
+                const runningTasks = Object.entries(data.tasks)
+                    .filter(([_, task]) => task.status === 'running')
+                    .map(([id]) => id);
+                
+                if (runningTasks.length > 0) {
+                    loadTaskLogs(runningTasks);
+                    // Update last update time
+                    const now = new Date();
+                    document.getElementById('last-update-time').textContent = 
+                        `Last update: ${now.toLocaleTimeString()}`;
+                }
+            }
+        })
+        .catch(e => console.error('Error refreshing logs:', e));
+    }, 5000);
+    
+    setInterval(loadLogFiles, 60000); // Refresh log list every minute
 });
 
 // Stop refreshing when page is hidden

@@ -1,0 +1,57 @@
+feat: Enhanced task management with cancellation, filtering, and real-time log monitoring
+
+## New Features
+
+### Task Management UI Enhancements
+- Added task cancellation functionality with Cancel button for running tasks
+- Implemented task status filtering with tabs (All, Running, Completed, Failed, Cancelled)
+- Added "Clear Completed" button to remove finished/failed/cancelled tasks from view
+- Real-time log monitoring: Last Log Line column showing latest log entry for each task
+- Auto-refresh of task status and logs every 5 seconds
+- Last update timestamp display for monitoring refresh activity
+
+### Backend Improvements
+- TaskManager now stores process objects for proper cancellation support
+- Added cancel_task() method with graceful termination (SIGTERM) and force kill fallback
+- Implemented clear_completed_tasks() to remove old task records
+- Added get_task_log_file() to map scripts to their log files
+- New API endpoint: POST /api/tasks/<task_id>/cancel
+- New API endpoint: POST /api/tasks/clear-completed
+- New API endpoint: GET /api/tasks/<task_id>/last-log
+
+### UI/UX Improvements
+- Tabbed interface for better task organization by status
+- Scroll position preservation during task status updates
+- Improved log display with monospace font and tooltip for full log line
+- Better visual feedback with status badges and progress indicators
+- Responsive table layout with proper text overflow handling
+
+## Technical Details
+
+### Task Cancellation
+- Uses process.terminate() for graceful shutdown
+- Falls back to process.kill() if termination fails
+- Supports both Windows (SIGTERM) and Unix-like systems
+- Updates task status to 'cancelled' with proper cleanup
+
+### Log Monitoring
+- Maps script names to log files:
+  - run_scraper.py → scraper.log
+  - run_version_scraper.py → scraper.log
+  - run_downloader.py → download.log
+  - run_description_downloader.py → description_downloader.log
+- Reads last line from log file with timestamp extraction
+- Caches log lines in JavaScript for performance
+- Updates logs every 5 seconds for running tasks only
+
+### Code Changes
+- utils/task_manager.py: Added processes storage, cancel_task(), clear_completed_tasks(), get_task_log_file()
+- web/routes.py: Added three new API endpoints for task management
+- web/templates/manage.html: Complete UI overhaul with tabs, log column, and cancellation support
+
+## Breaking Changes
+None
+
+## Migration Notes
+No migration required. Existing tasks will continue to work with new features.
+

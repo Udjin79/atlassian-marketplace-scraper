@@ -111,6 +111,7 @@ def register_routes(app):
             description_dir = os.path.join(settings.DESCRIPTIONS_DIR, addon_key.replace('.', '_'))
             description_files = []
             full_page_path = None
+            api_overview = None  # Brief description from API
             
             if os.path.exists(description_dir):
                 # Check for full page first
@@ -124,6 +125,31 @@ def register_routes(app):
                 for file in os.listdir(description_dir):
                     if file.endswith('.html') and file != 'index.html':
                         description_files.append(file)
+                
+                # Try to load overview from latest JSON description
+                json_files = [f for f in os.listdir(description_dir) if f.endswith('.json')]
+                if json_files:
+                    # Get latest JSON file
+                    latest_json = sorted(json_files)[-1]
+                    json_path = os.path.join(description_dir, latest_json)
+                    try:
+                        import json
+                        with open(json_path, 'r', encoding='utf-8') as f:
+                            desc_data = json.load(f)
+                            # Extract overview text
+                            overview = desc_data.get('overview', {})
+                            if isinstance(overview, dict):
+                                # Try different possible keys
+                                api_overview = (
+                                    overview.get('body', '') or 
+                                    overview.get('text', '') or 
+                                    overview.get('content', '') or
+                                    str(overview.get('html', ''))[:500] if overview.get('html') else ''
+                                )
+                            elif isinstance(overview, str):
+                                api_overview = overview
+                    except Exception as e:
+                        logger.debug(f"Could not load overview from JSON: {str(e)}")
 
             return render_template(
                 'app_detail.html',
@@ -131,7 +157,8 @@ def register_routes(app):
                 versions=versions,
                 description_files=description_files,
                 description_dir=description_dir,
-                full_page_path=full_page_path
+                full_page_path=full_page_path,
+                api_overview=api_overview
             )
 
         except Exception as e:
@@ -334,13 +361,42 @@ def register_routes(app):
                         addon_key = item.replace('_', '.')
                         app = store.get_app_by_key(addon_key)
                         if app:
-                            html_files = [f for f in os.listdir(item_path) if f.endswith('.html')]
-                            if html_files:
+                            # Find all HTML files (including in subdirectories like full_page)
+                            html_files = []
+                            
+                            # Check root directory
+                            for f in os.listdir(item_path):
+                                if f.endswith('.html'):
+                                    html_files.append(f)
+                            
+                            # Check full_page subdirectory
+                            full_page_dir = os.path.join(item_path, 'full_page')
+                            if os.path.exists(full_page_dir):
+                                for f in os.listdir(full_page_dir):
+                                    if f.endswith('.html'):
+                                        # Store with path for full_page
+                                        html_files.append(f'full_page/{f}')
+                            
+                            # Check for JSON files (API descriptions)
+                            json_files = [f for f in os.listdir(item_path) if f.endswith('.json')]
+                            
+                            if html_files or json_files:
+                                # Determine latest description
+                                latest_description = None
+                                if html_files:
+                                    # Prefer full_page/index.html if exists
+                                    if 'full_page/index.html' in html_files:
+                                        latest_description = 'full_page/index.html'
+                                    else:
+                                        latest_description = sorted(html_files)[-1]
+                                
                                 apps_with_descriptions.append({
                                     'app': app,
                                     'addon_key': addon_key,
                                     'description_count': len(html_files),
-                                    'latest_description': sorted(html_files)[-1] if html_files else None
+                                    'json_count': len(json_files),
+                                    'latest_description': latest_description,
+                                    'has_full_page': 'full_page/index.html' in html_files if html_files else False
                                 })
 
             return render_template(
@@ -506,11 +562,20 @@ def register_routes(app):
                 'BINARIES_DIR_CROWD': env_settings.get('BINARIES_DIR_CROWD', settings.PRODUCT_STORAGE_MAP.get('crowd', '')),
             }
             
+            # Get credentials (without exposing actual values)
+            from utils.credentials import get_credentials
+            credentials = get_credentials()
+            credentials_display = {
+                'username': credentials.get('username', ''),
+                'api_token': '***' if credentials.get('api_token') else ''
+            }
+            
             return render_template(
                 'manage.html',
                 latest_tasks=latest_tasks,
                 current_settings=current_settings,
                 storage_paths=storage_paths,
+                credentials=credentials_display,
                 products=PRODUCT_LIST
             )
         except Exception as e:
@@ -647,6 +712,95 @@ def register_routes(app):
             })
         except Exception as e:
             logger.error(f"Error getting tasks: {str(e)}")
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    @app.route('/api/tasks/<task_id>/cancel', methods=['POST'])
+    def api_cancel_task(task_id):
+        """Cancel a running task."""
+        try:
+            task_mgr = get_task_manager()
+            success = task_mgr.cancel_task(task_id)
+            
+            if success:
+                return jsonify({
+                    'success': True,
+                    'message': f'Task {task_id} cancelled successfully'
+                })
+            else:
+                return jsonify({
+                    'success': False,
+                    'error': f'Failed to cancel task {task_id}'
+                }), 400
+        except Exception as e:
+            logger.error(f"Error cancelling task: {str(e)}")
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    @app.route('/api/tasks/clear-completed', methods=['POST'])
+    def api_clear_completed_tasks():
+        """Clear all completed, failed, and cancelled tasks."""
+        try:
+            task_mgr = get_task_manager()
+            count = task_mgr.clear_completed_tasks()
+            
+            return jsonify({
+                'success': True,
+                'message': f'Cleared {count} task(s)',
+                'count': count
+            })
+        except Exception as e:
+            logger.error(f"Error clearing tasks: {str(e)}")
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    @app.route('/api/tasks/<task_id>/last-log')
+    def api_task_last_log(task_id):
+        """Get last log line for a task."""
+        try:
+            task_mgr = get_task_manager()
+            log_file = task_mgr.get_task_log_file(task_id)
+            
+            if not log_file or not os.path.exists(log_file):
+                return jsonify({
+                    'success': True,
+                    'log_line': None,
+                    'timestamp': None
+                })
+            
+            # Read last line from log file
+            try:
+                with open(log_file, 'r', encoding='utf-8', errors='replace') as f:
+                    lines = f.readlines()
+                    if lines:
+                        last_line = lines[-1].strip()
+                        # Try to extract timestamp from log line
+                        timestamp = None
+                        if last_line:
+                            # Log format: "2025-12-21 13:00:55,727 - INFO - ..."
+                            import re
+                            match = re.match(r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})', last_line)
+                            if match:
+                                timestamp = match.group(1)
+                        
+                        return jsonify({
+                            'success': True,
+                            'log_line': last_line,
+                            'timestamp': timestamp
+                        })
+                    else:
+                        return jsonify({
+                            'success': True,
+                            'log_line': None,
+                            'timestamp': None
+                        })
+            except Exception as e:
+                logger.error(f"Error reading log file {log_file}: {str(e)}")
+                return jsonify({
+                    'success': True,
+                    'log_line': None,
+                    'timestamp': None
+                })
+                
+        except Exception as e:
+            logger.error(f"Error getting task log: {str(e)}")
             return jsonify({'success': False, 'error': str(e)}), 500
 
     @app.route('/api/settings', methods=['GET'])
@@ -819,12 +973,123 @@ def register_routes(app):
             logger.error(f"Error updating storage paths: {str(e)}")
             return jsonify({'success': False, 'error': str(e)}), 500
 
+    @app.route('/api/credentials', methods=['GET'])
+    def api_get_credentials():
+        """Get credentials (masked)."""
+        try:
+            from utils.credentials import get_credentials
+            credentials = get_credentials()
+            return jsonify({
+                'success': True,
+                'credentials': {
+                    'username': credentials.get('username', ''),
+                    'api_token': '***' if credentials.get('api_token') else ''
+                }
+            })
+        except Exception as e:
+            logger.error(f"Error getting credentials: {str(e)}")
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    @app.route('/api/credentials', methods=['POST'])
+    def api_update_credentials():
+        """Update credentials."""
+        try:
+            data = request.get_json()
+            if not data:
+                return jsonify({'success': False, 'error': 'No data provided'}), 400
+            
+            username = data.get('username', '').strip()
+            api_token = data.get('api_token', '').strip()
+            
+            from utils.credentials import save_credentials
+            if save_credentials(username, api_token):
+                return jsonify({
+                    'success': True,
+                    'message': 'Credentials saved successfully'
+                })
+            else:
+                return jsonify({'success': False, 'error': 'Failed to save credentials'}), 500
+        except Exception as e:
+            logger.error(f"Error updating credentials: {str(e)}")
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    @app.route('/api/logs')
+    def api_logs():
+        """Get log files list."""
+        try:
+            log_files = []
+            logs_dir = settings.LOGS_DIR
+            
+            if os.path.exists(logs_dir):
+                for file in os.listdir(logs_dir):
+                    if file.endswith('.log') or ('.log.' in file and file.split('.log.')[-1].isdigit()):
+                        file_path = os.path.join(logs_dir, file)
+                        try:
+                            stat = os.stat(file_path)
+                            log_files.append({
+                                'name': file,
+                                'size': stat.st_size,
+                                'modified': stat.st_mtime
+                            })
+                        except Exception:
+                            pass
+            
+            # Sort by modified time (newest first)
+            log_files.sort(key=lambda x: x['modified'], reverse=True)
+            
+            return jsonify({
+                'success': True,
+                'logs': log_files
+            })
+        except Exception as e:
+            logger.error(f"Error getting logs: {str(e)}")
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    @app.route('/api/logs/<log_name>')
+    def api_log_content(log_name):
+        """Get log file content."""
+        try:
+            # Security: only allow .log files
+            if not (log_name.endswith('.log') or ('.log.' in log_name and log_name.split('.log.')[-1].isdigit())):
+                return jsonify({'success': False, 'error': 'Invalid log file'}), 400
+            
+            # Security: prevent directory traversal
+            log_name = os.path.basename(log_name)
+            
+            log_path = os.path.join(settings.LOGS_DIR, log_name)
+            if not os.path.exists(log_path):
+                return jsonify({'success': False, 'error': 'Log file not found'}), 404
+            
+            # Read last N lines (default 500)
+            lines = request.args.get('lines', 500, type=int)
+            
+            try:
+                with open(log_path, 'r', encoding='utf-8', errors='replace') as f:
+                    all_lines = f.readlines()
+                    # Get last N lines
+                    content = ''.join(all_lines[-lines:]) if len(all_lines) > lines else ''.join(all_lines)
+                
+                return jsonify({
+                    'success': True,
+                    'content': content,
+                    'total_lines': len(all_lines),
+                    'showing': min(lines, len(all_lines))
+                })
+            except Exception as e:
+                return jsonify({'success': False, 'error': f'Error reading log: {str(e)}'}), 500
+                
+        except Exception as e:
+            logger.error(f"Error getting log content: {str(e)}")
+            return jsonify({'success': False, 'error': str(e)}), 500
+
     @app.errorhandler(404)
     def not_found(e):
         """Handle 404 errors."""
+        logger.error(f"404 error: {str(e)}")
         return render_template('error.html', error='Page not found'), 404
 
     @app.errorhandler(500)
     def server_error(e):
         """Handle 500 errors."""
+        logger.error(f"500 error: {str(e)}", exc_info=True)
         return render_template('error.html', error='Internal server error'), 500

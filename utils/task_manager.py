@@ -4,6 +4,7 @@ import os
 import subprocess
 import json
 import threading
+import signal
 from datetime import datetime
 from typing import Dict, Optional
 from config import settings
@@ -21,6 +22,7 @@ class TaskManager:
     def __init__(self):
         """Initialize task manager."""
         self.tasks = {}
+        self.processes = {}  # Store process objects for cancellation
         self.lock = threading.Lock()
         self._load_status()
     
@@ -52,7 +54,8 @@ class TaskManager:
                     'started_at': datetime.now().isoformat(),
                     'script': script_name,
                     'progress': 0,
-                    'message': 'Starting...'
+                    'message': 'Starting...',
+                    'current_action': 'Initializing...'
                 }
                 self._save_status()
             
@@ -103,14 +106,37 @@ class TaskManager:
                     shell=False
                 )
                 
-                # Update status
+                # Update status and store process
                 with self.lock:
                     self.tasks[task_id]['pid'] = process.pid
                     self.tasks[task_id]['message'] = 'Running...'
+                    self.tasks[task_id]['current_action'] = 'Initializing...'
+                    self.processes[task_id] = process  # Store process for cancellation
                     self._save_status()
                 
                 # Wait for completion
                 stdout, _ = process.communicate()  # stderr is combined with stdout
+                
+                # Extract current action from output
+                if stdout:
+                    stdout_lines = stdout.split('\n')
+                    current_action = 'Running...'
+                    # Look for meaningful lines in output
+                    for line in reversed(stdout_lines[-20:]):  # Check last 20 lines
+                        line_stripped = line.strip()
+                        if line_stripped:
+                            line_lower = line_stripped.lower()
+                            # Update current action based on output
+                            if any(keyword in line_lower for keyword in ['scraping', 'scrape', 'downloading', 'download', 
+                                                                          'processing', 'process', 'saving', 'save', 
+                                                                          'fetching', 'fetch']):
+                                current_action = line_stripped[:100] if len(line_stripped) > 100 else line_stripped
+                                break
+                    
+                    # Update current action before final status
+                    with self.lock:
+                        self.tasks[task_id]['current_action'] = current_action
+                        self._save_status()
                 
                 # Update final status
                 with self.lock:
@@ -366,6 +392,118 @@ class TaskManager:
         with self.lock:
             return self.tasks.copy()
     
+    def cancel_task(self, task_id: str) -> bool:
+        """
+        Cancel a running task.
+        
+        Args:
+            task_id: Task ID to cancel
+            
+        Returns:
+            True if task was cancelled, False otherwise
+        """
+        with self.lock:
+            if task_id not in self.tasks:
+                logger.warning(f"Task {task_id} not found for cancellation")
+                return False
+            
+            task = self.tasks[task_id]
+            
+            # Check if task is running
+            if task.get('status') != 'running':
+                logger.warning(f"Task {task_id} is not running (status: {task.get('status')})")
+                return False
+            
+            # Try to get process object
+            process = self.processes.get(task_id)
+            
+            if process:
+                try:
+                    # Terminate the process
+                    if os.name == 'nt':  # Windows
+                        # On Windows, use terminate() which sends SIGTERM
+                        process.terminate()
+                        # Wait a bit, then force kill if needed
+                        try:
+                            process.wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            process.kill()
+                            logger.info(f"Force killed task {task_id}")
+                    else:  # Unix-like
+                        process.terminate()
+                        try:
+                            process.wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            process.kill()
+                            logger.info(f"Force killed task {task_id}")
+                    
+                    # Update task status
+                    self.tasks[task_id]['status'] = 'cancelled'
+                    self.tasks[task_id]['message'] = 'Cancelled by user'
+                    self.tasks[task_id]['finished_at'] = datetime.now().isoformat()
+                    self.tasks[task_id]['return_code'] = -1
+                    
+                    # Remove process from storage
+                    del self.processes[task_id]
+                    
+                    self._save_status()
+                    logger.info(f"Task {task_id} cancelled successfully")
+                    return True
+                    
+                except Exception as e:
+                    logger.error(f"Error cancelling task {task_id}: {str(e)}")
+                    # Try to kill by PID as fallback
+                    pid = task.get('pid')
+                    if pid:
+                        try:
+                            if os.name == 'nt':  # Windows
+                                os.kill(pid, signal.SIGTERM)
+                            else:
+                                os.kill(pid, signal.SIGTERM)
+                            
+                            self.tasks[task_id]['status'] = 'cancelled'
+                            self.tasks[task_id]['message'] = 'Cancelled by user (via PID)'
+                            self.tasks[task_id]['finished_at'] = datetime.now().isoformat()
+                            self.tasks[task_id]['return_code'] = -1
+                            
+                            if task_id in self.processes:
+                                del self.processes[task_id]
+                            
+                            self._save_status()
+                            logger.info(f"Task {task_id} cancelled via PID")
+                            return True
+                        except Exception as pid_error:
+                            logger.error(f"Failed to cancel task {task_id} via PID: {str(pid_error)}")
+                            return False
+                    return False
+            else:
+                # Process object not available, try by PID
+                pid = task.get('pid')
+                if pid:
+                    try:
+                        if os.name == 'nt':  # Windows
+                            os.kill(pid, signal.SIGTERM)
+                        else:
+                            os.kill(pid, signal.SIGTERM)
+                        
+                        self.tasks[task_id]['status'] = 'cancelled'
+                        self.tasks[task_id]['message'] = 'Cancelled by user (via PID)'
+                        self.tasks[task_id]['finished_at'] = datetime.now().isoformat()
+                        self.tasks[task_id]['return_code'] = -1
+                        
+                        if task_id in self.processes:
+                            del self.processes[task_id]
+                        
+                        self._save_status()
+                        logger.info(f"Task {task_id} cancelled via PID")
+                        return True
+                    except Exception as e:
+                        logger.error(f"Failed to cancel task {task_id} via PID: {str(e)}")
+                        return False
+                else:
+                    logger.warning(f"No process or PID found for task {task_id}")
+                    return False
+    
     def get_latest_task(self, task_type: str) -> Optional[Dict]:
         """Get latest task of specific type."""
         with self.lock:
@@ -375,6 +513,57 @@ class TaskManager:
             # Sort by started_at and return latest
             latest = max(matching.items(), key=lambda x: x[1].get('started_at', ''))
             return latest[1]
+    
+    def clear_completed_tasks(self) -> int:
+        """
+        Clear all completed, failed, and cancelled tasks.
+        
+        Returns:
+            Number of tasks cleared
+        """
+        with self.lock:
+            to_remove = []
+            for task_id, task in self.tasks.items():
+                status = task.get('status', '')
+                if status in ['completed', 'failed', 'cancelled']:
+                    to_remove.append(task_id)
+            
+            for task_id in to_remove:
+                del self.tasks[task_id]
+                # Also remove from processes if exists
+                if task_id in self.processes:
+                    del self.processes[task_id]
+            
+            self._save_status()
+            logger.info(f"Cleared {len(to_remove)} completed/failed/cancelled tasks")
+            return len(to_remove)
+    
+    def get_task_log_file(self, task_id: str) -> Optional[str]:
+        """
+        Get log file path for a task based on script name.
+        
+        Args:
+            task_id: Task ID
+            
+        Returns:
+            Path to log file or None
+        """
+        task = self.tasks.get(task_id)
+        if not task:
+            return None
+        
+        script = task.get('script', '')
+        log_file_map = {
+            'run_scraper.py': 'scraper.log',
+            'run_version_scraper.py': 'scraper.log',
+            'run_downloader.py': 'download.log',
+            'run_description_downloader.py': 'description_downloader.log'
+        }
+        
+        log_filename = log_file_map.get(script)
+        if log_filename:
+            return os.path.join(settings.LOGS_DIR, log_filename)
+        return None
 
 
 # Global task manager instance

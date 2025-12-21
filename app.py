@@ -1,10 +1,123 @@
 """Main Flask application entry point."""
 
 import os
+import sys
+import subprocess
 from flask import Flask
 from config import settings
 from web.routes import register_routes
-from utils.logger import setup_logging
+from utils.logger import setup_logging, get_logger
+
+logger = get_logger('app')
+
+
+def check_requirements():
+    """Check if all required packages from requirements.txt are installed."""
+    try:
+        requirements_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'requirements.txt')
+        if not os.path.exists(requirements_path):
+            logger.warning("requirements.txt not found, skipping package check")
+            return True
+        
+        with open(requirements_path, 'r', encoding='utf-8') as f:
+            requirements = [line.strip() for line in f if line.strip() and not line.startswith('#')]
+        
+        # Map package names to their import names
+        package_import_map = {
+            'python-decouple': 'decouple',
+            'beautifulsoup4': 'bs4',
+            'lxml': 'lxml',
+            'playwright': 'playwright',
+            'flask': 'flask',
+            'requests': 'requests',
+            'pandas': 'pandas',
+            'tqdm': 'tqdm'
+        }
+        
+        missing_packages = []
+        for req in requirements:
+            # Parse package name (handle version specifiers)
+            package_name = req.split('==')[0].split('>=')[0].split('<=')[0].split('>')[0].split('<')[0].strip()
+            # Get import name (use mapping or default to package name with dashes replaced)
+            import_name = package_import_map.get(package_name, package_name.replace('-', '_'))
+            
+            try:
+                __import__(import_name)
+            except ImportError:
+                missing_packages.append(package_name)
+        
+        if missing_packages:
+            logger.warning(f"Missing required packages: {', '.join(missing_packages)}")
+            print("=" * 60)
+            print("⚠️  WARNING: Missing required packages!")
+            print("=" * 60)
+            print(f"Attempting to install missing packages automatically...")
+            print()
+            
+            # Try to install missing packages automatically
+            import subprocess
+            import sys
+            
+            try:
+                # Install missing packages
+                result = subprocess.run(
+                    [sys.executable, '-m', 'pip', 'install'] + missing_packages,
+                    capture_output=True,
+                    text=True,
+                    timeout=300  # 5 minute timeout
+                )
+                
+                if result.returncode == 0:
+                    print("✅ Successfully installed missing packages!")
+                    print("=" * 60)
+                    # Verify installation
+                    still_missing = []
+                    for pkg in missing_packages:
+                        import_name = package_import_map.get(pkg, pkg.replace('-', '_'))
+                        try:
+                            __import__(import_name)
+                        except ImportError:
+                            still_missing.append(pkg)
+                    
+                    if still_missing:
+                        print("⚠️  Some packages could not be installed:")
+                        print(f"  {', '.join(still_missing)}")
+                        print(f"\nPlease install manually:")
+                        print(f"  pip install {' '.join(still_missing)}")
+                        print("=" * 60)
+                        return False
+                    else:
+                        print("✅ All packages are now installed!")
+                        print("=" * 60)
+                        return True
+                else:
+                    print("❌ Failed to install packages automatically:")
+                    print(result.stderr)
+                    print(f"\nPlease install manually:")
+                    print(f"  pip install {' '.join(missing_packages)}")
+                    print(f"\nOr install all requirements:")
+                    print(f"  pip install -r requirements.txt")
+                    print("=" * 60)
+                    return False
+            except subprocess.TimeoutExpired:
+                print("❌ Installation timed out. Please install manually:")
+                print(f"  pip install {' '.join(missing_packages)}")
+                print("=" * 60)
+                return False
+            except Exception as e:
+                print(f"❌ Error during automatic installation: {str(e)}")
+                print(f"\nPlease install manually:")
+                print(f"  pip install {' '.join(missing_packages)}")
+                print(f"\nOr install all requirements:")
+                print(f"  pip install -r requirements.txt")
+                print("=" * 60)
+                return False
+        
+        logger.info("All required packages are installed")
+        return True
+    except Exception as e:
+        logger.error(f"Error checking requirements: {str(e)}")
+        return True  # Don't block startup on check failure
 
 
 def create_app():
@@ -48,6 +161,10 @@ if __name__ == '__main__':
             return False
     
     try:
+        # Check requirements first
+        if not check_requirements():
+            sys.exit(1)
+        
         app = create_app()
         
         # Check port availability

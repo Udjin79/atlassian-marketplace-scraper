@@ -45,8 +45,16 @@ def get_binaries_dir_for_product(product: str) -> str:
     return os.path.join(BINARIES_BASE_DIR, product_lower)
 
 # Marketplace API Credentials
-MARKETPLACE_USERNAME = config('MARKETPLACE_USERNAME', default='')
-MARKETPLACE_API_TOKEN = config('MARKETPLACE_API_TOKEN', default='')
+# Try to load from credentials file first, then from env
+try:
+    from utils.credentials import get_credentials
+    credentials = get_credentials()
+    MARKETPLACE_USERNAME = config('MARKETPLACE_USERNAME', default=credentials.get('username', ''))
+    MARKETPLACE_API_TOKEN = config('MARKETPLACE_API_TOKEN', default=credentials.get('api_token', ''))
+except Exception:
+    # Fallback to env only
+    MARKETPLACE_USERNAME = config('MARKETPLACE_USERNAME', default='')
+    MARKETPLACE_API_TOKEN = config('MARKETPLACE_API_TOKEN', default='')
 
 # Scraper Settings
 SCRAPER_BATCH_SIZE = config('SCRAPER_BATCH_SIZE', default=50, cast=int)

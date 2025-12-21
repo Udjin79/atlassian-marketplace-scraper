@@ -14,6 +14,7 @@ Atlassian Marketplace Scraper — это Python-приложение для сб
 │  - run_scraper.py (сбор приложений)                          │
 │  - run_version_scraper.py (сбор версий)                     │
 │  - run_downloader.py (загрузка бинарников)                   │
+│  - run_description_downloader.py (скачивание описаний)       │
 │  - app.py (веб-интерфейс Flask)                              │
 └─────────────────────────────────────────────────────────────┘
                             │
@@ -25,9 +26,17 @@ Atlassian Marketplace Scraper — это Python-приложение для сб
 │  ├── AppScraper          → Сбор приложений                   │
 │  ├── VersionScraper      → Сбор версий (параллельно)         │
 │  ├── DownloadManager     → Загрузка бинарников (параллельно) │
+│  ├── DescriptionDownloader → Скачивание описаний (Playwright) │
 │  ├── MarketplaceAPI      → API клиент v2                     │
 │  ├── MarketplaceAPIv3    → API клиент v3                     │
 │  └── Filters             → Фильтрация по дате/хостингу       │
+│                                                               │
+│  utils/                                                       │
+│  ├── TaskManager         → Управление фоновыми задачами      │
+│  ├── RateLimiter         → Контроль частоты запросов          │
+│  ├── Checkpoint          → Сохранение прогресса               │
+│  ├── Logger              → Логирование с ротацией            │
+│  └── Credentials         → Управление учетными данными        │
 └─────────────────────────────────────────────────────────────┘
                             │
                             ▼
@@ -106,7 +115,47 @@ Atlassian Marketplace Scraper — это Python-приложение для сб
 - `MetadataStore` — для сохранения
 - `Filters` — для фильтрации данных
 
-#### 1.3. DownloadManager (`scraper/download_manager.py`)
+#### 1.3. DescriptionDownloader (`scraper/description_downloader.py`)
+**Назначение:** Скачивание описаний плагинов со страниц Marketplace
+
+**Основные функции:**
+- `download_description()` — скачивание описания для одного приложения
+- `download_all_descriptions()` — скачивание описаний для всех приложений
+- `save_marketplace_page_with_playwright()` — сохранение страницы через Playwright (headless браузер)
+- `save_marketplace_plugin_page()` — сохранение страницы с удалением скриптов (fallback)
+- `save_marketplace_plugin_page_static()` — генерация статического HTML из API данных
+
+**Особенности:**
+- **Playwright метод (рекомендуется):** Использует headless Chromium для выполнения JavaScript и захвата полностью отрендеренной страницы
+  - Формат MHTML: один файл со всеми ресурсами (CSS, изображения, шрифты)
+  - Формат HTML: HTML + папка с ресурсами
+  - Автоматическая авторизация через Basic Auth
+  - Ожидание завершения загрузки JavaScript
+- **Метод удаления скриптов (fallback):** Удаляет все `<script>` теги для предотвращения SPA роутинга
+  - Скачивает CSS и изображения локально
+  - Переписывает ссылки на локальные файлы
+  - Работает оффлайн, но может не содержать контент, загружаемый через JavaScript
+- **Статический API метод (fallback):** Генерирует HTML из данных REST API
+  - Не требует JavaScript
+  - Работает оффлайн
+  - Может не содержать весь визуальный контент со страницы
+
+**Зависимости:**
+- `Playwright` — для headless браузера (опционально, но рекомендуется)
+- `BeautifulSoup4` — для парсинга HTML
+- `requests` — для HTTP запросов
+- `MarketplaceAPI` — для получения данных через API
+
+**Требования:**
+- Playwright браузер: `playwright install chromium`
+- Интернет-соединение для доступа к Marketplace
+
+**Формат сохранения:**
+- MHTML файлы: `{DESCRIPTIONS_DIR}/{addon_key}/full_page/index.mhtml`
+- HTML файлы: `{DESCRIPTIONS_DIR}/{addon_key}/full_page/index.html`
+- Медиа-файлы: `{DESCRIPTIONS_DIR}/{addon_key}/media/`
+
+#### 1.4. DownloadManager (`scraper/download_manager.py`)
 **Назначение:** Загрузка бинарных файлов (JAR/OBR)
 
 **Основные функции:**
@@ -266,8 +315,63 @@ class Version:
 
 **Особенности:**
 - Разные логгеры для разных модулей (scraper, download, web)
-- Запись в файлы: `logs/scraper.log`, `logs/download.log`
+- Запись в файлы: `logs/scraper.log`, `logs/download.log`, `logs/description_downloader.log`
 - Уровни логирования: DEBUG, INFO, WARNING, ERROR
+- Ротация логов: максимальный размер 5 MB, до 5 резервных копий
+- Безопасная ротация на Windows (обработка PermissionError)
+
+#### 5.4. TaskManager (`utils/task_manager.py`)
+**Назначение:** Управление фоновыми задачами через веб-интерфейс
+
+**Основные функции:**
+- Запуск задач в фоновых потоках через `subprocess.Popen`
+- Хранение статуса задач в JSON файле (`task_status.json`)
+- Отслеживание прогресса выполнения
+- Управление процессами для возможности отмены
+
+**Методы:**
+- `start_scrape_apps(resume=False)` — запуск сбора приложений
+- `start_scrape_versions()` — запуск сбора версий
+- `start_download_binaries(product=None)` — запуск загрузки бинарников
+- `start_download_descriptions(addon_key=None, download_media=True)` — запуск скачивания описаний
+- `start_full_pipeline(...)` — последовательный запуск всех задач
+- `cancel_task(task_id)` — отмена выполняющейся задачи
+- `clear_completed_tasks()` — удаление завершенных задач
+- `get_task_log_file(task_id)` — получение пути к лог-файлу задачи
+- `get_task_status(task_id)` — получение статуса задачи
+- `get_all_tasks()` — получение всех задач
+
+**Особенности:**
+- Thread-safe операции через `threading.Lock`
+- Сохранение объектов процессов для корректной отмены
+- Автоматическое обновление статуса (running, completed, failed, cancelled)
+- Отслеживание текущего действия задачи через парсинг stdout
+- Маппинг скриптов на лог-файлы для мониторинга
+
+**Структура задачи:**
+```python
+{
+    'task_id': 'scrape_apps_20241221_120000',
+    'script': 'run_scraper.py',
+    'status': 'running',  # running, completed, failed, cancelled
+    'started_at': '2024-12-21T12:00:00',
+    'finished_at': None,
+    'progress': 45,
+    'current_action': 'Processing app 150/300',
+    'message': 'Running...',
+    'return_code': None,
+    'pid': 12345,
+    'error': None
+}
+```
+
+#### 5.5. Credentials Manager (`utils/credentials.py`)
+**Назначение:** Безопасное хранение учетных данных API
+
+**Особенности:**
+- Хранение в `.credentials.json` (не в `.env`)
+- Исключение из git через `.gitignore`
+- Методы: `get_credentials()`, `save_credentials(username, api_token)`
 
 ### 6. Конфигурация (`config/`)
 
@@ -402,16 +506,24 @@ render_template() [отображение HTML]
 ## Безопасность
 
 1. **Аутентификация:**
-   - Хранение credentials в переменных окружения (.env)
-   - Базовая HTTP аутентификация для API
+   - Хранение credentials в `.credentials.json` (отдельно от `.env`)
+   - `.credentials.json` исключен из git через `.gitignore`
+   - Возможность управления через веб-интерфейс
 
 2. **Валидация данных:**
    - Проверка существования файлов перед загрузкой
    - Валидация размеров файлов
+   - Проверка расширений файлов для логов (предотвращение directory traversal)
 
 3. **Обработка путей:**
-   - Использование os.path.join() для безопасных путей
+   - Использование `os.path.join()` для безопасных путей
    - Проверка существования директорий
+   - Использование `os.path.basename()` для предотвращения directory traversal
+
+4. **Управление процессами:**
+   - Безопасная отмена задач через SIGTERM
+   - Обработка ошибок при завершении процессов
+   - Очистка ресурсов при отмене задач
 
 ## Расширяемость
 
