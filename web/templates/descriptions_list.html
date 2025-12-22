@@ -10,92 +10,360 @@
     </div>
 </div>
 
+<!-- Loading Indicator -->
+<div id="descriptions-loading" class="text-center py-5">
+    <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
+        <span class="visually-hidden">Loading...</span>
+    </div>
+    <p class="mt-3 text-muted">Scanning descriptions directory...</p>
+    <small class="text-muted">This may take a few seconds if you have many descriptions.</small>
+</div>
+
+<!-- Content Container (hidden until loaded) -->
+<div id="descriptions-content" style="display: none;">
 <div class="row mt-4">
     <div class="col-12">
-        {% if apps %}
         <div class="card">
             <div class="card-header bg-dark text-white">
                 <h5 class="mb-0">
-                    <i class="bi bi-list"></i> Apps with Descriptions ({{ apps|length }})
+                    <i class="bi bi-list"></i> Apps with Descriptions (<span id="descriptions-count">0</span>)
                 </h5>
             </div>
             <div class="card-body">
+                <div class="mb-3">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <input type="text" class="form-control" id="descriptions-filter" placeholder="Filter by app name, addon key, or vendor..." onkeyup="filterDescriptionsTable(this.value)">
+                        </div>
+                        <div class="col-md-6 text-end">
+                            <small class="text-muted" id="descriptions-filter-count"></small>
+                        </div>
+                    </div>
+                </div>
                 <div class="table-responsive">
-                    <table class="table table-hover">
+                    <table class="table table-hover table-sortable" id="descriptions-table">
                         <thead>
                             <tr>
-                                <th>App Name</th>
-                                <th>Addon Key</th>
-                                <th>Vendor</th>
-                                <th>Descriptions</th>
-                                <th>Actions</th>
+                                <th class="sortable" style="min-width: 200px; width: 25%;" onclick="sortDescriptionsTable(0, 'name')">
+                                    App Name <i class="bi bi-arrow-down-up"></i>
+                                </th>
+                                <th class="sortable" style="min-width: 200px; width: 20%;" onclick="sortDescriptionsTable(1, 'key')">
+                                    Addon Key <i class="bi bi-arrow-down-up"></i>
+                                </th>
+                                <th class="sortable" style="min-width: 150px; width: 15%;" onclick="sortDescriptionsTable(2, 'vendor')">
+                                    Vendor <i class="bi bi-arrow-down-up"></i>
+                                </th>
+                                <th style="min-width: 150px; width: 15%;">Descriptions</th>
+                                <th style="min-width: 250px; width: 25%;">Actions</th>
                             </tr>
                         </thead>
-                        <tbody>
-                            {% for item in apps %}
-                            <tr>
-                                <td>
-                                    <strong>{{ item.app.name }}</strong>
-                                </td>
-                                <td>
-                                    <code>{{ item.addon_key }}</code>
-                                </td>
-                                <td>{{ item.app.vendor }}</td>
-                                <td>
-                                    <span class="badge bg-info">{{ item.description_count }} HTML file(s)</span>
-                                    {% if item.json_count > 0 %}
-                                    <span class="badge bg-success">{{ item.json_count }} JSON file(s)</span>
-                                    {% endif %}
-                                    {% if item.has_full_page %}
-                                    <span class="badge bg-primary">Full Page</span>
-                                    {% endif %}
-                                </td>
-                                <td>
-                                    {% if item.latest_description %}
-                                    <a href="{{ url_for('app_description', addon_key=item.addon_key, filename=item.latest_description) }}" 
-                                       target="_blank" class="btn btn-sm btn-primary">
-                                        <i class="bi bi-eye"></i> View Latest
-                                    </a>
-                                    {% if item.has_full_page %}
-                                    <a href="{{ url_for('app_description', addon_key=item.addon_key, filename='full_page/index.html') }}" 
-                                       target="_blank" class="btn btn-sm btn-success">
-                                        <i class="bi bi-file-earmark-code"></i> Full Page
-                                    </a>
-                                    {% endif %}
-                                    {% if item.documentation_url %}
-                                    <a href="{{ item.documentation_url }}" 
-                                       target="_blank" class="btn btn-sm btn-info">
-                                        <i class="bi bi-book"></i> Documentation
-                                    </a>
-                                    {% endif %}
-                                    <a href="{{ url_for('app_detail', addon_key=item.addon_key) }}" 
-                                       class="btn btn-sm btn-outline-secondary">
-                                        <i class="bi bi-info-circle"></i> App Details
-                                    </a>
-                                    {% endif %}
-                                </td>
-                            </tr>
-                            {% endfor %}
+                        <tbody id="descriptions-tbody">
+                            <!-- Will be populated via JavaScript -->
                         </tbody>
                     </table>
                 </div>
             </div>
         </div>
-        {% else %}
-        <div class="alert alert-info" role="alert">
-            <h5 class="alert-heading"><i class="bi bi-info-circle"></i> No Descriptions Yet</h5>
-            <p>No plugin descriptions have been downloaded yet.</p>
-            <hr>
-            <p class="mb-0">
-                <strong>To download descriptions:</strong><br>
-                1. Go to <a href="{{ url_for('manage') }}">Management</a> page<br>
-                2. Click "Start Description Download" in the "Download Descriptions" section<br>
-                3. Wait for the download to complete
-            </p>
-        </div>
-        {% endif %}
     </div>
 </div>
+</div>
+
+<!-- No Descriptions Message (hidden by default) -->
+<div id="descriptions-empty" style="display: none;">
+    <div class="alert alert-info" role="alert">
+        <h5 class="alert-heading"><i class="bi bi-info-circle"></i> No Descriptions Yet</h5>
+        <p>No plugin descriptions have been downloaded yet.</p>
+        <hr>
+        <p class="mb-0">
+            <strong>To download descriptions:</strong><br>
+            1. Go to <a href="{{ url_for('manage') }}">Management</a> page<br>
+            2. Click "Start Description Download" in the "Download Descriptions" section<br>
+            3. Wait for the download to complete
+        </p>
+    </div>
+</div>
+
+<script>
+// Load descriptions list on page load (lazy loading)
+document.addEventListener('DOMContentLoaded', function() {
+    const loadingDiv = document.getElementById('descriptions-loading');
+    const contentDiv = document.getElementById('descriptions-content');
+    const emptyDiv = document.getElementById('descriptions-empty');
+    const tbody = document.getElementById('descriptions-tbody');
+    const countSpan = document.getElementById('descriptions-count');
+    
+    fetch('/api/descriptions')
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            return response.json();
+        })
+        .then(data => {
+            if (!data.success) {
+                loadingDiv.innerHTML = `<div class="alert alert-danger">Error: ${data.error || 'Unknown error'}</div>`;
+                return;
+            }
+            
+            const apps = data.apps || [];
+            
+            if (apps.length === 0) {
+                loadingDiv.style.display = 'none';
+                emptyDiv.style.display = 'block';
+                return;
+            }
+            
+            // Update count
+            if (countSpan) {
+                countSpan.textContent = apps.length;
+            }
+            
+            // Render table rows
+            if (tbody) {
+                // Clear any existing content
+                tbody.innerHTML = '';
+                
+                // Store apps data for sorting/filtering
+                window.descriptionsData = apps;
+                
+                apps.forEach(item => {
+                    // Safely extract app data
+                    const appName = (item.app && item.app.name) ? item.app.name : 'Unknown';
+                    const appVendor = (item.app && item.app.vendor) ? item.app.vendor : 'N/A';
+                    const addonKey = item.addon_key || 'N/A';
+                    
+                    // Create table row with data attributes for filtering/sorting
+                    const tr = document.createElement('tr');
+                    tr.setAttribute('data-app-name', appName.toLowerCase());
+                    tr.setAttribute('data-addon-key', addonKey.toLowerCase());
+                    tr.setAttribute('data-vendor', appVendor.toLowerCase());
+                    
+                    // App Name cell
+                    const tdName = document.createElement('td');
+                    const strongName = document.createElement('strong');
+                    strongName.textContent = appName;
+                    tdName.appendChild(strongName);
+                    tr.appendChild(tdName);
+                    
+                    // Addon Key cell
+                    const tdKey = document.createElement('td');
+                    const codeKey = document.createElement('code');
+                    codeKey.textContent = addonKey;
+                    tdKey.appendChild(codeKey);
+                    tr.appendChild(tdKey);
+                    
+                    // Vendor cell
+                    const tdVendor = document.createElement('td');
+                    tdVendor.textContent = appVendor;
+                    tr.appendChild(tdVendor);
+                    
+                    // Descriptions cell
+                    const tdDescriptions = document.createElement('td');
+                    if (item.description_count > 0) {
+                        const badge1 = document.createElement('span');
+                        badge1.className = 'badge bg-info';
+                        badge1.textContent = `${item.description_count} HTML file(s)`;
+                        tdDescriptions.appendChild(badge1);
+                    }
+                    if (item.json_count > 0) {
+                        const badge2 = document.createElement('span');
+                        badge2.className = 'badge bg-success';
+                        badge2.textContent = `${item.json_count} JSON file(s)`;
+                        tdDescriptions.appendChild(badge2);
+                    }
+                    if (item.has_full_page) {
+                        const badge3 = document.createElement('span');
+                        badge3.className = 'badge bg-primary';
+                        badge3.textContent = 'Full Page';
+                        tdDescriptions.appendChild(badge3);
+                    }
+                    tr.appendChild(tdDescriptions);
+                    
+                    // Actions cell
+                    const tdActions = document.createElement('td');
+                    if (item.latest_description) {
+                        const latestUrl = `/apps/${encodeURIComponent(addonKey)}/description/${encodeURIComponent(item.latest_description)}`;
+                        const btnLatest = document.createElement('a');
+                        btnLatest.href = latestUrl;
+                        btnLatest.target = '_blank';
+                        btnLatest.className = 'btn btn-sm btn-primary';
+                        btnLatest.innerHTML = '<i class="bi bi-eye"></i> View Latest';
+                        tdActions.appendChild(btnLatest);
+                        
+                        if (item.has_full_page) {
+                            const fullPageUrl = `/apps/${encodeURIComponent(addonKey)}/description/full_page/index.html`;
+                            const btnFull = document.createElement('a');
+                            btnFull.href = fullPageUrl;
+                            btnFull.target = '_blank';
+                            btnFull.className = 'btn btn-sm btn-success';
+                            btnFull.innerHTML = '<i class="bi bi-file-earmark-code"></i> Full Page';
+                            tdActions.appendChild(btnFull);
+                        }
+                        
+                        // Always show documentation button, but disable if URL is missing or invalid
+                        const btnDoc = document.createElement('button');
+                        btnDoc.type = 'button';
+                        btnDoc.className = 'btn btn-sm';
+                        btnDoc.innerHTML = '<i class="bi bi-book"></i> Documentation';
+                        
+                        if (item.documentation_url && item.documentation_url.trim() !== '') {
+                            // Valid URL - make it a clickable link
+                            const docLink = document.createElement('a');
+                            docLink.href = item.documentation_url;
+                            docLink.target = '_blank';
+                            docLink.className = 'btn btn-sm btn-info';
+                            docLink.innerHTML = '<i class="bi bi-book"></i> Documentation';
+                            docLink.title = 'Open vendor documentation';
+                            tdActions.appendChild(docLink);
+                        } else {
+                            // No URL or invalid - make it disabled with tooltip
+                            btnDoc.className = 'btn btn-sm btn-secondary';
+                            btnDoc.disabled = true;
+                            btnDoc.title = 'Documentation link is not available or invalid';
+                            btnDoc.style.cursor = 'not-allowed';
+                            tdActions.appendChild(btnDoc);
+                        }
+                        
+                        const appDetailsUrl = `/apps/${encodeURIComponent(addonKey)}`;
+                        const btnDetails = document.createElement('a');
+                        btnDetails.href = appDetailsUrl;
+                        btnDetails.className = 'btn btn-sm btn-outline-secondary';
+                        btnDetails.innerHTML = '<i class="bi bi-info-circle"></i> App Details';
+                        tdActions.appendChild(btnDetails);
+                    }
+                    tr.appendChild(tdActions);
+                    
+                    tbody.appendChild(tr);
+                });
+            }
+            
+            // Hide loading, show content
+            loadingDiv.style.display = 'none';
+            contentDiv.style.display = 'block';
+        })
+        .catch(error => {
+            console.error('Error loading descriptions:', error);
+            loadingDiv.innerHTML = `<div class="alert alert-danger">Error loading descriptions: ${error.message}</div>`;
+        });
+});
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// Descriptions table sorting
+let descriptionsSortState = { column: -1, direction: 'asc' };
+
+function sortDescriptionsTable(columnIndex, sortType) {
+    const table = document.getElementById('descriptions-table');
+    if (!table) return;
+    
+    const tbody = document.getElementById('descriptions-tbody');
+    if (!tbody) return;
+    
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+    if (rows.length === 0) return;
+    
+    // Determine sort direction
+    let direction = 'asc';
+    if (descriptionsSortState.column === columnIndex && descriptionsSortState.direction === 'asc') {
+        direction = 'desc';
+    }
+    
+    // Update sort state
+    descriptionsSortState = { column: columnIndex, direction: direction };
+    
+    // Remove sort indicators from all headers
+    table.querySelectorAll('thead th').forEach(th => {
+        const icon = th.querySelector('i');
+        if (icon) {
+            icon.className = 'bi bi-arrow-down-up';
+        }
+    });
+    
+    // Add sort indicator to current column
+    const header = table.querySelectorAll('thead th')[columnIndex];
+    if (header) {
+        const icon = header.querySelector('i');
+        if (icon) {
+            icon.className = direction === 'asc' ? 'bi bi-arrow-up' : 'bi bi-arrow-down';
+        }
+    }
+    
+    // Sort rows
+    rows.sort((a, b) => {
+        let aValue, bValue;
+        
+        if (sortType === 'name') {
+            aValue = a.getAttribute('data-app-name') || '';
+            bValue = b.getAttribute('data-app-name') || '';
+        } else if (sortType === 'key') {
+            aValue = a.getAttribute('data-addon-key') || '';
+            bValue = b.getAttribute('data-addon-key') || '';
+        } else if (sortType === 'vendor') {
+            aValue = a.getAttribute('data-vendor') || '';
+            bValue = b.getAttribute('data-vendor') || '';
+        } else {
+            return 0;
+        }
+        
+        // Compare values
+        if (direction === 'asc') {
+            return aValue.localeCompare(bValue);
+        } else {
+            return bValue.localeCompare(aValue);
+        }
+    });
+    
+    // Re-append sorted rows
+    rows.forEach(row => tbody.appendChild(row));
+    
+    // Update filter count if filter is active
+    const filterInput = document.getElementById('descriptions-filter');
+    if (filterInput && filterInput.value) {
+        filterDescriptionsTable(filterInput.value);
+    }
+}
+
+// Descriptions table filtering
+function filterDescriptionsTable(searchText) {
+    const tbody = document.getElementById('descriptions-tbody');
+    if (!tbody) return;
+    
+    const rows = tbody.querySelectorAll('tr');
+    const searchLower = searchText.toLowerCase();
+    let visibleCount = 0;
+    
+    rows.forEach(row => {
+        const appName = row.getAttribute('data-app-name') || '';
+        const addonKey = row.getAttribute('data-addon-key') || '';
+        const vendor = row.getAttribute('data-vendor') || '';
+        
+        if (searchText === '' || 
+            appName.includes(searchLower) || 
+            addonKey.includes(searchLower) || 
+            vendor.includes(searchLower)) {
+            row.style.display = '';
+            visibleCount++;
+        } else {
+            row.style.display = 'none';
+        }
+    });
+    
+    // Update filter count
+    const countEl = document.getElementById('descriptions-filter-count');
+    if (countEl) {
+        if (searchText === '') {
+            countEl.textContent = '';
+        } else {
+            countEl.textContent = `Showing ${visibleCount} of ${rows.length} apps`;
+        }
+    }
+}
+</script>
 
 {% endblock %}
 

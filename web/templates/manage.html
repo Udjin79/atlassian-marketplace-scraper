@@ -139,6 +139,21 @@
                     </button>
                     <div id="status-download-descriptions" class="mt-2"></div>
                 </div>
+
+                <!-- Build Search Index Task -->
+                <div class="mb-4 p-3 border rounded">
+                    <h6><i class="bi bi-search"></i> 5. Build Search Index</h6>
+                    <p class="text-muted small">Build or rebuild the full-text search index for plugin descriptions and release notes</p>
+                    <p class="text-muted small">
+                        <i class="bi bi-info-circle"></i> 
+                        This will index all descriptions (JSON, HTML) and release notes. 
+                        The index is used for fast searching on the Search page.
+                    </p>
+                    <button id="btn-build-index" class="btn btn-primary" onclick="startBuildIndex()">
+                        <i class="bi bi-play-fill"></i> Build Search Index
+                    </button>
+                    <div id="status-build-index" class="mt-2"></div>
+                </div>
             </div>
         </div>
     </div>
@@ -540,6 +555,7 @@ function startScrapeApps(resume) {
     .then(r => r.json())
     .then(data => {
         if (data.success) {
+            activeTaskIds['scrape-apps'] = data.task_id;
             statusDiv.innerHTML = `<div class="alert alert-success"><i class="bi bi-check-circle"></i> Task started: ${data.task_id}</div>`;
             setTimeout(() => refreshTaskStatus(), 2000);
         } else {
@@ -567,6 +583,7 @@ function startScrapeVersions() {
     .then(r => r.json())
     .then(data => {
         if (data.success) {
+            activeTaskIds['scrape-versions'] = data.task_id;
             statusDiv.innerHTML = `<div class="alert alert-success"><i class="bi bi-check-circle"></i> Task started: ${data.task_id}</div>`;
             setTimeout(() => refreshTaskStatus(), 2000);
         } else {
@@ -579,6 +596,16 @@ function startScrapeVersions() {
         btn.disabled = false;
     });
 }
+
+// Track active task IDs for each button type
+const activeTaskIds = {
+    'download': null,
+    'download-descriptions': null,
+    'scrape-apps': null,
+    'scrape-versions': null,
+    'pipeline': null,
+    'build-index': null
+};
 
 function startDownload() {
     const btn = document.getElementById('btn-download');
@@ -596,6 +623,7 @@ function startDownload() {
     .then(r => r.json())
     .then(data => {
         if (data.success) {
+            activeTaskIds['download'] = data.task_id;
             statusDiv.innerHTML = `<div class="alert alert-success"><i class="bi bi-check-circle"></i> Task started: ${data.task_id}</div>`;
             setTimeout(() => refreshTaskStatus(), 2000);
         } else {
@@ -629,6 +657,7 @@ function startDownloadDescriptions() {
     .then(r => r.json())
     .then(data => {
         if (data.success) {
+            activeTaskIds['download-descriptions'] = data.task_id;
             statusDiv.innerHTML = `<div class="alert alert-success"><i class="bi bi-check-circle"></i> Task started: ${data.task_id}</div>`;
             setTimeout(() => refreshTaskStatus(), 2000);
         } else {
@@ -676,6 +705,34 @@ function saveSettings() {
     });
 }
 
+function startBuildIndex() {
+    const btn = document.getElementById('btn-build-index');
+    const statusDiv = document.getElementById('status-build-index');
+    
+    btn.disabled = true;
+    statusDiv.innerHTML = '<div class="spinner-border spinner-border-sm me-2"></div>Starting...';
+    
+    fetchWithCSRF('/api/tasks/start/build-index', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'}
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            activeTaskIds['build-index'] = data.task_id;
+            statusDiv.innerHTML = `<div class="alert alert-success"><i class="bi bi-check-circle"></i> Task started: ${data.task_id}</div>`;
+            setTimeout(() => refreshTaskStatus(), 2000);
+        } else {
+            statusDiv.innerHTML = `<div class="alert alert-danger">Error: ${data.error}</div>`;
+            btn.disabled = false;
+        }
+    })
+    .catch(e => {
+        statusDiv.innerHTML = `<div class="alert alert-danger">Error: ${e.message}</div>`;
+        btn.disabled = false;
+    });
+}
+
 function startPipeline() {
     const btn = document.getElementById('btn-pipeline');
     const statusDiv = document.getElementById('status-pipeline');
@@ -707,6 +764,7 @@ function startPipeline() {
     .then(r => r.json())
     .then(data => {
         if (data.success) {
+            activeTaskIds['pipeline'] = data.task_id;
             statusDiv.innerHTML = `<div class="alert alert-success"><i class="bi bi-check-circle"></i> Pipeline started: ${data.task_id}</div>`;
             
             // Start polling for progress
@@ -1131,11 +1189,20 @@ function cancelTask(taskId) {
         return;
     }
     
-    fetch(`/api/tasks/${taskId}/cancel`, {
+    fetchWithCSRF(`/api/tasks/${taskId}/cancel`, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'}
     })
-    .then(r => r.json())
+    .then(r => {
+        // Check if response is JSON
+        const contentType = r.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+            return r.text().then(text => {
+                throw new Error(`Server returned non-JSON response. Status: ${r.status}. Response: ${text.substring(0, 200)}`);
+            });
+        }
+        return r.json();
+    })
     .then(data => {
         if (data.success) {
             // Refresh task status after a short delay
@@ -1190,8 +1257,8 @@ function renderTasksTable(container, tasks, loadLogs = false) {
         return;
     }
     
-    let html = '<div class="table-responsive"><table class="table table-hover table-sm">';
-    html += '<thead><tr><th>Task ID</th><th>Script</th><th>Status</th><th>Current Action</th><th>Last Log Line</th><th>Progress</th><th>Started</th><th>Actions</th></tr></thead><tbody>';
+    let html = '<div class="table-responsive"><table class="table table-hover table-sm table-resizable" style="table-layout: fixed; width: 100%; min-width: 1300px;">';
+    html += '<thead><tr><th style="min-width: 200px; width: 15%;">Task ID</th><th style="min-width: 150px; width: 12%;">Script</th><th style="min-width: 80px; width: 8%;">Status</th><th style="min-width: 200px; width: 20%;">Current Action</th><th style="min-width: 300px; width: 25%;">Last Log Line</th><th style="min-width: 120px; width: 10%;">Progress</th><th style="min-width: 150px; width: 12%;">Started</th><th style="min-width: 100px; width: 8%;">Actions</th></tr></thead><tbody>';
     
     tasks.forEach(([taskId, task]) => {
         const statusBadge = task.status === 'completed' ? 'bg-success' :
@@ -1208,10 +1275,18 @@ function renderTasksTable(container, tasks, loadLogs = false) {
         let logTitle = '';
         
         if (cachedLog && cachedLog.log_line) {
-            logLine = escapeHtml(cachedLog.log_line).substring(0, 150);
+            // Show more text - up to 500 characters, with full text in title
+            logLine = escapeHtml(cachedLog.log_line).substring(0, 500);
+            if (cachedLog.log_line.length > 500) {
+                logLine += '...';
+            }
             logTitle = escapeHtml(cachedLog.log_line);
         } else if (task.status === 'running') {
             logLine = '<em class="text-muted">Loading log...</em>';
+            logTitle = 'Log is being loaded...';
+        } else {
+            logLine = '<em class="text-muted">No log available</em>';
+            logTitle = 'No log file found or log file is empty';
         }
         
         html += `<tr>
@@ -1219,7 +1294,7 @@ function renderTasksTable(container, tasks, loadLogs = false) {
             <td>${task.script || 'N/A'}</td>
             <td><span class="badge ${statusBadge}">${task.status || 'unknown'}</span></td>
             <td><small class="text-muted">${escapeHtml(currentAction)}</small></td>
-            <td><small class="text-muted" id="log-${taskId}" style="font-family: monospace; font-size: 0.85em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 400px; display: inline-block;" title="${logTitle}">${logLine}</small></td>
+            <td><small class="text-muted" id="log-${taskId}" style="font-family: monospace; font-size: 0.85em; white-space: normal; word-wrap: break-word; max-width: 1000px; display: block;" title="${logTitle}">${logLine}</small></td>
             <td>
                 <div class="progress" style="height: 20px; width: 100px;">
                     <div class="progress-bar ${task.status === 'running' ? 'progress-bar-striped progress-bar-animated' : ''}" 
@@ -1238,6 +1313,12 @@ function renderTasksTable(container, tasks, loadLogs = false) {
     
     html += '</tbody></table></div>';
     container.innerHTML = html;
+    
+    // Make the table resizable
+    const table = container.querySelector('table');
+    if (table && typeof makeTableResizable === 'function') {
+        makeTableResizable(table);
+    }
 }
 
 function loadTaskLogs(taskIds) {
@@ -1248,11 +1329,29 @@ function loadTaskLogs(taskIds) {
     // Load logs in parallel (batch requests)
     const logPromises = taskIds.map(taskId => 
         fetch(`/api/tasks/${taskId}/last-log`)
-            .then(r => r.json())
-            .then(data => ({ taskId, data }))
+            .then(r => {
+                // Check if response is JSON
+                const contentType = r.headers.get('content-type');
+                if (!contentType || !contentType.includes('application/json')) {
+                    return r.text().then(text => {
+                        console.error(`[loadTaskLogs] Non-JSON response for ${taskId}:`, text.substring(0, 200));
+                        throw new Error(`Server returned non-JSON response. Status: ${r.status}`);
+                    });
+                }
+                return r.json();
+            })
+            .then(data => {
+                console.log(`[loadTaskLogs] Loaded log for ${taskId}:`, {
+                    success: data.success,
+                    hasLogLine: !!data.log_line,
+                    logLineLength: data.log_line ? data.log_line.length : 0
+                });
+                return { taskId, data };
+            })
             .catch(e => {
-                console.error(`Error loading log for ${taskId}:`, e);
-                return { taskId, data: { success: false } };
+                console.error(`[loadTaskLogs] Error loading log for ${taskId}:`, e);
+                console.error(`[loadTaskLogs] Task ID: ${taskId}, Error type: ${e.constructor.name}, Message: ${e.message}`);
+                return { taskId, data: { success: false, error: e.message } };
             })
     );
     
@@ -1269,13 +1368,35 @@ function loadTaskLogs(taskIds) {
                 const logElement = document.getElementById(`log-${taskId}`);
                 if (logElement) {
                     if (data.log_line) {
-                        const logText = escapeHtml(data.log_line).substring(0, 150);
-                        logElement.textContent = logText;
-                        logElement.title = escapeHtml(data.log_line); // Full text on hover
+                        // Show up to 500 characters with full text in title
+                        const fullLogText = escapeHtml(data.log_line);
+                        let displayText = fullLogText.substring(0, 500);
+                        if (fullLogText.length > 500) {
+                            displayText += '...';
+                        }
+                        logElement.textContent = displayText;
+                        logElement.title = fullLogText; // Full text on hover
+                        logElement.style.maxWidth = '1000px';
+                        logElement.style.whiteSpace = 'normal';
+                        logElement.style.wordWrap = 'break-word';
                     } else {
                         logElement.innerHTML = '<em class="text-muted">No log yet</em>';
-                        logElement.title = '';
+                        logElement.title = 'Log file exists but is empty or no log entries found';
+                        console.warn(`[loadTaskLogs] Task ${taskId}: Log file exists but log_line is empty`);
                     }
+                } else {
+                    console.warn(`[loadTaskLogs] Task ${taskId}: Log element not found in DOM`);
+                }
+            } else {
+                // Log failure details
+                const logElement = document.getElementById(`log-${taskId}`);
+                if (logElement) {
+                    const errorMsg = data.error || 'Failed to load log';
+                    logElement.innerHTML = `<em class="text-danger">Error: ${escapeHtml(errorMsg)}</em>`;
+                    logElement.title = `Failed to load log: ${escapeHtml(errorMsg)}`;
+                    console.error(`[loadTaskLogs] Task ${taskId}: Failed to load log - ${errorMsg}`);
+                } else {
+                    console.error(`[loadTaskLogs] Task ${taskId}: Failed to load log and element not found`);
                 }
             }
         });
@@ -1440,6 +1561,45 @@ function refreshTaskStatusFromData(tasks) {
         'failed': tasksList.filter(([_, task]) => task.status === 'failed'),
         'cancelled': tasksList.filter(([_, task]) => task.status === 'cancelled')
     };
+    
+    // Check if tracked tasks have completed and re-enable buttons
+    const buttonMap = {
+        'download': 'btn-download',
+        'download-descriptions': 'btn-download-descriptions',
+        'scrape-apps': 'btn-scrape-apps',
+        'scrape-versions': 'btn-scrape-versions',
+        'pipeline': 'btn-pipeline',
+        'build-index': 'btn-build-index'
+    };
+    
+    Object.keys(activeTaskIds).forEach(taskType => {
+        const taskId = activeTaskIds[taskType];
+        if (taskId && tasks[taskId]) {
+            const task = tasks[taskId];
+            // If task is completed, failed, or cancelled, re-enable the button
+            if (task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled') {
+                const btnId = buttonMap[taskType];
+                if (btnId) {
+                    const btn = document.getElementById(btnId);
+                    if (btn) {
+                        btn.disabled = false;
+                    }
+                }
+                // Clear the tracked task ID
+                activeTaskIds[taskType] = null;
+            }
+        } else if (taskId && !tasks[taskId]) {
+            // Task not found (might have been cleared), re-enable button
+            const btnId = buttonMap[taskType];
+            if (btnId) {
+                const btn = document.getElementById(btnId);
+                if (btn) {
+                    btn.disabled = false;
+                }
+            }
+            activeTaskIds[taskType] = null;
+        }
+    });
     
     // Render each tab
     Object.keys(tasksByStatus).forEach(status => {

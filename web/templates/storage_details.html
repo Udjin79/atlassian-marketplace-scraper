@@ -10,7 +10,17 @@
     </div>
 </div>
 
-{% if stats %}
+<!-- Loading Indicator -->
+<div id="storage-loading" class="text-center py-5">
+    <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
+        <span class="visually-hidden">Loading...</span>
+    </div>
+    <p class="mt-3 text-muted">Calculating storage statistics...</p>
+    <small class="text-muted">This may take a few seconds if you have many files.</small>
+</div>
+
+<!-- Content Container (hidden until loaded) -->
+<div id="storage-content" style="display: none;">
 <!-- Total Summary -->
 <div class="row mb-4">
     <div class="col-12">
@@ -21,33 +31,17 @@
             <div class="card-body">
                 <div class="row">
                     <div class="col-md-3">
-                        <h3>
-                            {% if stats.total.gb >= 1.0 %}
-                                {{ "%.2f"|format(stats.total.gb) }} GB
-                            {% else %}
-                                {{ "%.0f"|format(stats.total.mb) }} MB
-                            {% endif %}
-                        </h3>
+                        <h3 id="storage-total-size">-</h3>
                         <small class="text-muted">Total Size</small>
                     </div>
                     <div class="col-md-3">
-                        <h3>{{ stats.total.file_count }}</h3>
+                        <h3 id="storage-total-files">-</h3>
                         <small class="text-muted">Total Files</small>
                     </div>
                     <div class="col-md-6">
                         <h6>By Disk:</h6>
-                        <div class="d-flex flex-wrap gap-2">
-                            {% for drive, disk_data in stats.by_disk.items() %}
-                            <span class="badge bg-secondary">
-                                <strong>{{ drive }}</strong>: 
-                                {% if disk_data.gb >= 1.0 %}
-                                    {{ "%.2f"|format(disk_data.gb) }} GB
-                                {% else %}
-                                    {{ "%.0f"|format(disk_data.mb) }} MB
-                                {% endif %}
-                                ({{ disk_data.file_count }} files)
-                            </span>
-                            {% endfor %}
+                        <div class="d-flex flex-wrap gap-2" id="storage-by-disk">
+                            <!-- Will be populated via JavaScript -->
                         </div>
                     </div>
                 </div>
@@ -57,87 +51,8 @@
 </div>
 
 <!-- Categories Breakdown -->
-<div class="row mb-4">
-    {% for category, cat_data in stats.categories.items() %}
-    <div class="col-md-4 mb-3">
-        <div class="card h-100">
-            <div class="card-header bg-dark text-white">
-                <h5 class="mb-0 text-capitalize">
-                    <i class="bi bi-folder"></i> {{ category }}
-                </h5>
-            </div>
-            <div class="card-body">
-                <div class="mb-3">
-                    <h3>
-                        {% if cat_data.gb >= 1.0 %}
-                            {{ "%.2f"|format(cat_data.gb) }} GB
-                        {% else %}
-                            {{ "%.0f"|format(cat_data.mb) }} MB
-                        {% endif %}
-                    </h3>
-                    <small class="text-muted">{{ cat_data.file_count }} files</small>
-                </div>
-                
-                {% if cat_data.by_disk %}
-                <div class="mb-3">
-                    <h6>By Disk:</h6>
-                    <ul class="list-unstyled">
-                        {% for drive, disk_data in cat_data.by_disk.items() %}
-                        <li class="mb-1">
-                            <strong>{{ drive }}</strong>: 
-                            {% if disk_data.gb >= 1.0 %}
-                                {{ "%.2f"|format(disk_data.gb) }} GB
-                            {% else %}
-                                {{ "%.0f"|format(disk_data.mb) }} MB
-                            {% endif %}
-                            <small class="text-muted">({{ disk_data.file_count }} files)</small>
-                        </li>
-                        {% endfor %}
-                    </ul>
-                </div>
-                {% endif %}
-                
-                {% if cat_data.folders %}
-                <div>
-                    <h6>Top Folders:</h6>
-                    <div class="table-responsive" style="max-height: 300px; overflow-y: auto;">
-                        <table class="table table-sm table-hover">
-                            <thead>
-                                <tr>
-                                    <th>Folder</th>
-                                    <th class="text-end">Size</th>
-                                    <th class="text-end">Files</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for folder in cat_data.folders[:20] %}
-                                <tr>
-                                    <td>
-                                        <code class="small">{{ folder.name }}</code>
-                                        <br><small class="text-muted">{{ folder.path }}</small>
-                                    </td>
-                                    <td class="text-end">
-                                        {% if folder.gb >= 1.0 %}
-                                            {{ "%.2f"|format(folder.gb) }} GB
-                                        {% else %}
-                                            {{ "%.0f"|format(folder.mb) }} MB
-                                        {% endif %}
-                                    </td>
-                                    <td class="text-end">{{ folder.file_count }}</td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                    {% if cat_data.folders|length > 20 %}
-                    <small class="text-muted">Showing top 20 folders ({{ cat_data.folders|length }} total)</small>
-                    {% endif %}
-                </div>
-                {% endif %}
-            </div>
-        </div>
-    </div>
-    {% endfor %}
+<div class="row mb-4" id="storage-categories">
+    <!-- Will be populated via JavaScript -->
 </div>
 
 <!-- Detailed Folders Table -->
@@ -149,75 +64,341 @@
             </div>
             <div class="card-body">
                 <ul class="nav nav-tabs" id="categoryTabs" role="tablist">
-                    {% for category in stats.categories.keys() %}
-                    <li class="nav-item" role="presentation">
-                        <button class="nav-link {% if loop.first %}active{% endif %}" 
-                                id="{{ category }}-tab" 
-                                data-bs-toggle="tab" 
-                                data-bs-target="#{{ category }}" 
-                                type="button" 
-                                role="tab">
-                            {{ category|title }}
-                        </button>
-                    </li>
-                    {% endfor %}
+                    <!-- Will be populated via JavaScript -->
                 </ul>
                 <div class="tab-content mt-3" id="categoryTabContent">
-                    {% for category, cat_data in stats.categories.items() %}
-                    <div class="tab-pane fade {% if loop.first %}show active{% endif %}" 
-                         id="{{ category }}" 
-                         role="tabpanel">
-                        <div class="table-responsive">
-                            <table class="table table-hover">
-                                <thead>
-                                    <tr>
-                                        <th>Folder Path</th>
-                                        <th>Drive</th>
-                                        <th class="text-end">Size</th>
-                                        <th class="text-end">Files</th>
-                                        <th class="text-end">% of Category</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {% for folder in cat_data.folders %}
-                                    <tr>
-                                        <td>
-                                            <code>{{ folder.path }}</code>
-                                        </td>
-                                        <td><span class="badge bg-secondary">{{ folder.drive }}</span></td>
-                                        <td class="text-end">
-                                            {% if folder.gb >= 1.0 %}
-                                                {{ "%.2f"|format(folder.gb) }} GB
-                                            {% else %}
-                                                {{ "%.0f"|format(folder.mb) }} MB
-                                            {% endif %}
-                                        </td>
-                                        <td class="text-end">{{ folder.file_count }}</td>
-                                        <td class="text-end">
-                                            {% if cat_data.bytes > 0 %}
-                                                {{ "%.1f"|format((folder.bytes / cat_data.bytes * 100)) }}%
-                                            {% else %}
-                                                0%
-                                            {% endif %}
-                                        </td>
-                                    </tr>
-                                    {% endfor %}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                    {% endfor %}
+                    <!-- Will be populated via JavaScript -->
                 </div>
             </div>
         </div>
     </div>
 </div>
-{% else %}
-<div class="alert alert-info">
-    <h5 class="alert-heading">No Storage Data</h5>
-    <p>Storage statistics are not available yet.</p>
 </div>
-{% endif %}
+
+<!-- No Storage Data Message (hidden by default) -->
+<div id="storage-empty" style="display: none;">
+    <div class="alert alert-info">
+        <h5 class="alert-heading">No Storage Data</h5>
+        <p>Storage statistics are not available yet.</p>
+    </div>
+</div>
+
+<script>
+// Load storage details on page load (lazy loading)
+document.addEventListener('DOMContentLoaded', function() {
+    const loadingDiv = document.getElementById('storage-loading');
+    const contentDiv = document.getElementById('storage-content');
+    const emptyDiv = document.getElementById('storage-empty');
+    
+    fetch('/api/storage-stats')
+        .then(response => response.json())
+        .then(data => {
+            if (data.error) {
+                loadingDiv.innerHTML = `<div class="alert alert-danger">Error: ${data.error}</div>`;
+                return;
+            }
+            
+            if (!data || !data.total || data.total.file_count === 0) {
+                loadingDiv.style.display = 'none';
+                emptyDiv.style.display = 'block';
+                return;
+            }
+            
+            // Update total summary
+            const totalSizeEl = document.getElementById('storage-total-size');
+            if (totalSizeEl) {
+                totalSizeEl.textContent = data.total.gb >= 1.0 ? 
+                    data.total.gb.toFixed(2) + ' GB' : 
+                    Math.round(data.total.mb) + ' MB';
+            }
+            
+            const totalFilesEl = document.getElementById('storage-total-files');
+            if (totalFilesEl) {
+                totalFilesEl.textContent = data.total.file_count;
+            }
+            
+            // Update by disk badges
+            const byDiskContainer = document.getElementById('storage-by-disk');
+            if (byDiskContainer && data.by_disk) {
+                byDiskContainer.innerHTML = Object.entries(data.by_disk).map(([drive, diskData]) => {
+                    const size = diskData.gb >= 1.0 ? 
+                        diskData.gb.toFixed(2) + ' GB' : 
+                        Math.round(diskData.mb) + ' MB';
+                    return `<span class="badge bg-secondary">
+                        <strong>${drive}</strong>: ${size} (${diskData.file_count} files)
+                    </span>`;
+                }).join('');
+            }
+            
+            // Render categories
+            const categoriesContainer = document.getElementById('storage-categories');
+            const tabsContainer = document.getElementById('categoryTabs');
+            const tabsContentContainer = document.getElementById('categoryTabContent');
+            
+            if (categoriesContainer && data.categories) {
+                // Render category cards
+                categoriesContainer.innerHTML = Object.entries(data.categories).map(([category, catData]) => {
+                    const size = catData.gb >= 1.0 ? 
+                        catData.gb.toFixed(2) + ' GB' : 
+                        Math.round(catData.mb) + ' MB';
+                    
+                    let byDiskHtml = '';
+                    if (catData.by_disk) {
+                        byDiskHtml = '<div class="mb-3"><h6>By Disk:</h6><ul class="list-unstyled">';
+                        byDiskHtml += Object.entries(catData.by_disk).map(([drive, diskData]) => {
+                            const diskSize = diskData.gb >= 1.0 ? 
+                                diskData.gb.toFixed(2) + ' GB' : 
+                                Math.round(diskData.mb) + ' MB';
+                            return `<li class="mb-1">
+                                <strong>${drive}</strong>: ${diskSize}
+                                <small class="text-muted">(${diskData.file_count} files)</small>
+                            </li>`;
+                        }).join('');
+                        byDiskHtml += '</ul></div>';
+                    }
+                    
+                    let foldersHtml = '';
+                    // Filter out empty folders (0 bytes and 0 files)
+                    const nonEmptyFolders = (catData.folders || []).filter(folder => folder.bytes > 0 || folder.file_count > 0);
+                    if (nonEmptyFolders.length > 0) {
+                        foldersHtml = '<div><h6>Top Folders:</h6><div class="table-responsive" style="max-height: 300px; overflow-y: auto;"><table class="table table-sm table-hover"><thead><tr><th>Folder</th><th class="text-end">Size</th><th class="text-end">Files</th></tr></thead><tbody>';
+                        foldersHtml += nonEmptyFolders.slice(0, 20).map(folder => {
+                            const folderSize = folder.gb >= 1.0 ? 
+                                folder.gb.toFixed(2) + ' GB' : 
+                                Math.round(folder.mb) + ' MB';
+                            return `<tr>
+                                <td><code class="small">${escapeHtml(folder.name)}</code><br><small class="text-muted">${escapeHtml(folder.path)}</small></td>
+                                <td class="text-end">${folderSize}</td>
+                                <td class="text-end">${folder.file_count}</td>
+                            </tr>`;
+                        }).join('');
+                        foldersHtml += '</tbody></table></div>';
+                        if (nonEmptyFolders.length > 20) {
+                            foldersHtml += `<small class="text-muted">Showing top 20 folders (${nonEmptyFolders.length} total, empty folders hidden)</small>`;
+                        } else {
+                            foldersHtml += `<small class="text-muted">${nonEmptyFolders.length} folders (empty folders hidden)</small>`;
+                        }
+                        foldersHtml += '</div>';
+                    }
+                    
+                    return `<div class="col-md-4 mb-3">
+                        <div class="card h-100">
+                            <div class="card-header bg-dark text-white">
+                                <h5 class="mb-0 text-capitalize">
+                                    <i class="bi bi-folder"></i> ${escapeHtml(category)}
+                                </h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="mb-3">
+                                    <h3>${size}</h3>
+                                    <small class="text-muted">${catData.file_count} files</small>
+                                </div>
+                                ${byDiskHtml}
+                                ${foldersHtml}
+                            </div>
+                        </div>
+                    </div>`;
+                }).join('');
+            }
+            
+            // Render tabs
+            if (tabsContainer && tabsContentContainer && data.categories) {
+                const categories = Object.keys(data.categories);
+                tabsContainer.innerHTML = categories.map((category, index) => 
+                    `<li class="nav-item" role="presentation">
+                        <button class="nav-link ${index === 0 ? 'active' : ''}" 
+                                id="${category}-tab" 
+                                data-bs-toggle="tab" 
+                                data-bs-target="#${category}" 
+                                type="button" 
+                                role="tab">
+                            ${category.charAt(0).toUpperCase() + category.slice(1)}
+                        </button>
+                    </li>`
+                ).join('');
+                
+                tabsContentContainer.innerHTML = categories.map((category, index) => {
+                    const catData = data.categories[category];
+                    // Filter out empty folders (0 bytes and 0 files)
+                    const nonEmptyFolders = catData.folders.filter(folder => folder.bytes > 0 || folder.file_count > 0);
+                    
+                    const tableId = `folders-table-${category}`;
+                    const rows = nonEmptyFolders.map((folder, rowIndex) => {
+                        const folderSize = folder.gb >= 1.0 ? 
+                            folder.gb.toFixed(2) + ' GB' : 
+                            Math.round(folder.mb) + ' MB';
+                        const percent = catData.bytes > 0 ? 
+                            ((folder.bytes / catData.bytes) * 100).toFixed(1) : 
+                            '0';
+                        return `<tr data-folder-path="${escapeHtml(folder.path)}" data-drive="${escapeHtml(folder.drive)}" data-size="${folder.bytes}" data-files="${folder.file_count}" data-percent="${percent}">
+                            <td><code>${escapeHtml(folder.path)}</code></td>
+                            <td><span class="badge bg-secondary">${escapeHtml(folder.drive)}</span></td>
+                            <td class="text-end" data-sort-value="${folder.bytes}">${folderSize}</td>
+                            <td class="text-end" data-sort-value="${folder.file_count}">${folder.file_count}</td>
+                            <td class="text-end" data-sort-value="${percent}">${percent}%</td>
+                        </tr>`;
+                    }).join('');
+                    
+                    return `<div class="tab-pane fade ${index === 0 ? 'show active' : ''}" 
+                         id="${category}" 
+                         role="tabpanel">
+                        <div class="mb-3">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <input type="text" class="form-control" id="filter-${category}" placeholder="Filter by path or drive..." onkeyup="filterTable('${tableId}', this.value)">
+                                </div>
+                                <div class="col-md-6 text-end">
+                                    <small class="text-muted">Showing ${nonEmptyFolders.length} folders (empty folders hidden)</small>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="table table-hover table-sortable" id="${tableId}">
+                                <thead>
+                                    <tr>
+                                        <th class="sortable" data-sort="path" onclick="sortTable('${tableId}', 0, 'path')">
+                                            Folder Path <i class="bi bi-arrow-down-up"></i>
+                                        </th>
+                                        <th class="sortable" data-sort="drive" onclick="sortTable('${tableId}', 1, 'drive')">
+                                            Drive <i class="bi bi-arrow-down-up"></i>
+                                        </th>
+                                        <th class="text-end sortable" data-sort="size" onclick="sortTable('${tableId}', 2, 'size')">
+                                            Size <i class="bi bi-arrow-down-up"></i>
+                                        </th>
+                                        <th class="text-end sortable" data-sort="files" onclick="sortTable('${tableId}', 3, 'files')">
+                                            Files <i class="bi bi-arrow-down-up"></i>
+                                        </th>
+                                        <th class="text-end sortable" data-sort="percent" onclick="sortTable('${tableId}', 4, 'percent')">
+                                            % of Category <i class="bi bi-arrow-down-up"></i>
+                                        </th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${rows}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>`;
+                }).join('');
+            }
+            
+            // Hide loading, show content
+            loadingDiv.style.display = 'none';
+            contentDiv.style.display = 'block';
+        })
+        .catch(error => {
+            console.error('Error loading storage details:', error);
+            loadingDiv.innerHTML = `<div class="alert alert-danger">Error loading storage statistics: ${error.message}</div>`;
+        });
+});
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// Table sorting functionality
+let sortState = {}; // Store sort state for each table
+
+function sortTable(tableId, columnIndex, sortType) {
+    const table = document.getElementById(tableId);
+    if (!table) return;
+    
+    const tbody = table.querySelector('tbody');
+    if (!tbody) return;
+    
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+    if (rows.length === 0) return;
+    
+    // Get current sort state for this table
+    const currentSort = sortState[tableId] || { column: -1, direction: 'asc' };
+    
+    // Determine sort direction
+    let direction = 'asc';
+    if (currentSort.column === columnIndex && currentSort.direction === 'asc') {
+        direction = 'desc';
+    }
+    
+    // Update sort state
+    sortState[tableId] = { column: columnIndex, direction: direction };
+    
+    // Remove sort indicators from all headers
+    table.querySelectorAll('thead th').forEach(th => {
+        const icon = th.querySelector('i');
+        if (icon) {
+            icon.className = 'bi bi-arrow-down-up';
+        }
+    });
+    
+    // Add sort indicator to current column
+    const header = table.querySelectorAll('thead th')[columnIndex];
+    if (header) {
+        const icon = header.querySelector('i');
+        if (icon) {
+            icon.className = direction === 'asc' ? 'bi bi-arrow-up' : 'bi bi-arrow-down';
+        }
+    }
+    
+    // Sort rows
+    rows.sort((a, b) => {
+        let aValue, bValue;
+        
+        if (sortType === 'path') {
+            aValue = a.getAttribute('data-folder-path') || '';
+            bValue = b.getAttribute('data-folder-path') || '';
+        } else if (sortType === 'drive') {
+            aValue = a.getAttribute('data-drive') || '';
+            bValue = b.getAttribute('data-drive') || '';
+        } else if (sortType === 'size') {
+            aValue = parseFloat(a.getAttribute('data-size') || 0);
+            bValue = parseFloat(b.getAttribute('data-size') || 0);
+        } else if (sortType === 'files') {
+            aValue = parseInt(a.getAttribute('data-files') || 0);
+            bValue = parseInt(b.getAttribute('data-files') || 0);
+        } else if (sortType === 'percent') {
+            aValue = parseFloat(a.getAttribute('data-percent') || 0);
+            bValue = parseFloat(b.getAttribute('data-percent') || 0);
+        } else {
+            return 0;
+        }
+        
+        // Compare values
+        if (typeof aValue === 'string') {
+            return direction === 'asc' ? aValue.localeCompare(bValue) : bValue.localeCompare(aValue);
+        } else {
+            return direction === 'asc' ? aValue - bValue : bValue - aValue;
+        }
+    });
+    
+    // Re-append sorted rows
+    rows.forEach(row => tbody.appendChild(row));
+}
+
+// Table filtering functionality
+function filterTable(tableId, searchText) {
+    const table = document.getElementById(tableId);
+    if (!table) return;
+    
+    const tbody = table.querySelector('tbody');
+    if (!tbody) return;
+    
+    const rows = tbody.querySelectorAll('tr');
+    const searchLower = searchText.toLowerCase();
+    
+    rows.forEach(row => {
+        const path = (row.getAttribute('data-folder-path') || '').toLowerCase();
+        const drive = (row.getAttribute('data-drive') || '').toLowerCase();
+        
+        if (searchText === '' || path.includes(searchLower) || drive.includes(searchLower)) {
+            row.style.display = '';
+        } else {
+            row.style.display = 'none';
+        }
+    });
+}
+</script>
 
 {% endblock %}
 

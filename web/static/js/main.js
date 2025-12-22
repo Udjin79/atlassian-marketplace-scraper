@@ -115,3 +115,124 @@ function formatDate(dateString) {
         day: 'numeric'
     });
 }
+
+// Scroll to top button functionality
+document.addEventListener('DOMContentLoaded', function() {
+    const scrollToTopBtn = document.getElementById('scrollToTopBtn');
+    
+    if (scrollToTopBtn) {
+        // Show/hide button based on scroll position
+        window.addEventListener('scroll', function() {
+            if (window.pageYOffset > 300) {
+                scrollToTopBtn.style.display = 'block';
+            } else {
+                scrollToTopBtn.style.display = 'none';
+            }
+        });
+        
+        // Scroll to top on click
+        scrollToTopBtn.addEventListener('click', function() {
+            window.scrollTo({
+                top: 0,
+                behavior: 'smooth'
+            });
+        });
+    }
+});
+
+// Make table columns resizable
+function makeTableResizable(table) {
+    if (!table) return;
+    
+    // Add resizable class
+    table.classList.add('table-resizable');
+    
+    const ths = table.querySelectorAll('thead th');
+    ths.forEach((th, index) => {
+        // Skip last column (no resizer needed)
+        if (index === ths.length - 1) return;
+        
+        // Get initial width or use auto
+        let currentWidth = th.offsetWidth;
+        if (!th.style.width) {
+            th.style.width = currentWidth + 'px';
+        }
+        
+        // Create resizer element
+        const resizer = document.createElement('div');
+        resizer.className = 'resizer';
+        th.appendChild(resizer);
+        
+        let startX, startWidth, isResizing = false;
+        
+        resizer.addEventListener('mousedown', function(e) {
+            e.preventDefault();
+            isResizing = true;
+            startX = e.pageX;
+            startWidth = th.offsetWidth;
+            
+            document.addEventListener('mousemove', handleMouseMove);
+            document.addEventListener('mouseup', handleMouseUp);
+            
+            resizer.classList.add('active');
+            document.body.style.cursor = 'col-resize';
+            document.body.style.userSelect = 'none';
+        });
+        
+        function handleMouseMove(e) {
+            if (!isResizing) return;
+            
+            const diff = e.pageX - startX;
+            const newWidth = startWidth + diff;
+            
+            // Minimum width constraint
+            if (newWidth >= 50) {
+                th.style.width = newWidth + 'px';
+            }
+        }
+        
+        function handleMouseUp() {
+            if (!isResizing) return;
+            
+            isResizing = false;
+            resizer.classList.remove('active');
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+            
+            document.removeEventListener('mousemove', handleMouseMove);
+            document.removeEventListener('mouseup', handleMouseUp);
+        }
+    });
+}
+
+// Initialize resizable tables on page load
+document.addEventListener('DOMContentLoaded', function() {
+    // Find all tables and make them resizable
+    const tables = document.querySelectorAll('table.table');
+    tables.forEach(function(table) {
+        makeTableResizable(table);
+    });
+    
+    // Also handle dynamically added tables (e.g., in manage.html)
+    const observer = new MutationObserver(function(mutations) {
+        mutations.forEach(function(mutation) {
+            mutation.addedNodes.forEach(function(node) {
+                if (node.nodeType === 1) { // Element node
+                    if (node.tagName === 'TABLE' && node.classList.contains('table')) {
+                        makeTableResizable(node);
+                    }
+                    // Also check for tables inside added nodes
+                    const tables = node.querySelectorAll ? node.querySelectorAll('table.table') : [];
+                    tables.forEach(function(table) {
+                        makeTableResizable(table);
+                    });
+                }
+            });
+        });
+    });
+    
+    observer.observe(document.body, {
+        childList: true,
+        subtree: true
+    });
+});

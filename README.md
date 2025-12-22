@@ -14,10 +14,14 @@ The stable release line is maintained in the `stable` branch.
 - **Complete Marketplace Scraping**: Scrapes all apps across Jira, Confluence, Bitbucket, Bamboo, and Crowd
 - **Version Filtering**: Filters versions released in the last year, Server/Data Center hosting only
 - **Binary Downloads**: Downloads JAR/OBR files with resume capability
+- **Plugin Descriptions**: Downloads full page descriptions with media files
+- **Full-Text Search**: Search across plugin descriptions and release notes using Whoosh
+- **Manual Index Building**: Build search index as background task with progress tracking
 - **Web Interface**: Flask-based UI for browsing apps and versions
 - **Checkpoint/Resume**: Robust checkpoint system for interrupted scraping
 - **Concurrent Downloads**: Multi-threaded downloads with configurable concurrency
 - **Metadata Storage**: SQLite database for apps and versions
+- **Vendor Documentation Links**: Automatic extraction and display of vendor documentation URLs
 
 ## Architecture
 
@@ -55,17 +59,33 @@ AtlassianMarketplaceScraper/
 
 ### Quick Setup (Windows)
 
-**Automated installation script:**
+**Option 1: Install and Run (Recommended)**
 ```powershell
+# Run the launcher script (installs dependencies if needed and starts the app)
+.\start.ps1
+```
+
+Or double-click `start.bat` in Windows Explorer.
+
+**Option 2: Install Only**
+```powershell
+# Run the installer script
 .\install.ps1
 ```
 
-The script will:
+The installer script will:
 - Check Python installation
 - Create virtual environment
 - Install all dependencies
 - Create `.env` file with configuration
 - Generate SECRET_KEY automatically
+
+The launcher script (`start.ps1` or `start.bat`) will:
+- Check Python installation
+- Create virtual environment if needed
+- Install dependencies if needed
+- Check/install Playwright browser
+- Launch the Flask web application automatically
 
 See [SETUP_GUIDE.md](SETUP_GUIDE.md) for detailed instructions.
 
@@ -86,6 +106,8 @@ See [SETUP_GUIDE.md](SETUP_GUIDE.md) for detailed instructions.
    ```bash
    pip install -r requirements.txt
    ```
+
+   **Note:** The project uses **Whoosh** library for full-text search. It will be installed automatically with other dependencies.
 
 4. **Configure environment variables:**
    Create `.env` file with your credentials and settings (see Configuration section)
@@ -155,7 +177,9 @@ python app.py
 **Features:**
 - Dashboard with statistics
 - App catalog with search and filtering
-- Version details with download links
+- Full-text search across plugin descriptions and release notes
+- Version details with download links and release notes
+- Vendor documentation links
 - REST API endpoints (`/api/*`)
 
 ## Configuration
@@ -209,6 +233,8 @@ The web interface provides REST API endpoints:
 - `GET /api/apps/<addon_key>` - Get app details
 - `GET /api/stats` - Get statistics
 - `GET /api/products` - Get product list
+- `GET /api/search?q=query` - Full-text search across descriptions and release notes
+- `POST /api/search/rebuild-index` - Rebuild search index (admin only)
 - `GET /download/<product>/<app_key>/<version_id>` - Download binary
 
 ## Data Storage

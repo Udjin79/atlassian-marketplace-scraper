@@ -59,14 +59,12 @@
                 <h5 class="card-title text-warning">
                     <i class="bi bi-hdd"></i> Storage Used
                 </h5>
-                <h2 class="card-text">
-                    {% if stats.storage_used_gb >= 1.0 %}
-                        {{ "%.2f"|format(stats.storage_used_gb) }} GB
-                    {% else %}
-                        {{ "%.0f"|format(stats.storage_used_mb) }} MB
-                    {% endif %}
+                <h2 class="card-text" id="storage-used">
+                    <div class="spinner-border spinner-border-sm" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
                 </h2>
-                <small class="text-muted">{{ stats.file_count }} files</small>
+                <small class="text-muted" id="storage-files">Loading...</small>
                 <div class="mt-2">
                     <a href="{{ url_for('storage_details') }}" class="btn btn-sm btn-outline-warning">
                         <i class="bi bi-bar-chart"></i> View Details

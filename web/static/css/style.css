@@ -34,6 +34,56 @@ main {
     vertical-align: middle;
 }
 
+/* Descriptions table specific styles */
+#descriptions-table {
+    table-layout: auto;
+    width: 100%;
+    border-collapse: collapse;
+}
+
+#descriptions-table th,
+#descriptions-table td {
+    padding: 0.75rem;
+    text-align: left;
+    vertical-align: top;
+    border: 1px solid #dee2e6;
+}
+
+#descriptions-table th {
+    background-color: #f8f9fa;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+#descriptions-table td {
+    white-space: normal;
+    word-wrap: break-word;
+    word-break: break-word;
+}
+
+#descriptions-table td:first-child {
+    font-weight: 500;
+}
+
+#descriptions-table td code {
+    font-size: 0.9em;
+    background-color: #f8f9fa;
+    padding: 0.2rem 0.4rem;
+    border-radius: 0.25rem;
+}
+
+#descriptions-table .badge {
+    margin-right: 0.25rem;
+    margin-bottom: 0.25rem;
+    display: inline-block;
+}
+
+#descriptions-table .btn {
+    margin-right: 0.25rem;
+    margin-bottom: 0.25rem;
+    white-space: nowrap;
+}
+
 /* Badge spacing */
 .badge {
     margin-right: 0.25rem;
@@ -95,4 +145,122 @@ form .row {
 .breadcrumb {
     background-color: transparent;
     padding: 0;
+}
+
+/* Sticky navbar spacing */
+main {
+    padding-top: 1rem;
+}
+
+/* Scroll to top button */
+#scrollToTopBtn {
+    transition: opacity 0.3s, transform 0.3s;
+}
+
+#scrollToTopBtn:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 6px 12px rgba(0,0,0,0.4);
+}
+
+/* Resizable table columns */
+.table-resizable {
+    table-layout: fixed;
+    width: 100%;
+}
+
+.table-resizable th {
+    position: relative;
+    user-select: none;
+}
+
+.table-resizable th .resizer {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 5px;
+    height: 100%;
+    cursor: col-resize;
+    background-color: transparent;
+    z-index: 1;
+}
+
+.table-resizable th .resizer:hover {
+    background-color: #007bff;
+    opacity: 0.5;
+}
+
+.table-resizable th .resizer.active {
+    background-color: #007bff;
+    opacity: 0.8;
+}
+
+.table-resizable th:last-child .resizer {
+    display: none;
+}
+
+/* Tasks table specific styles - prevent narrow columns on initial render */
+.table-resizable thead th:nth-child(1) { /* Task ID */
+    min-width: 200px;
+    width: 15%;
+}
+
+.table-resizable thead th:nth-child(2) { /* Script */
+    min-width: 150px;
+    width: 12%;
+}
+
+.table-resizable thead th:nth-child(3) { /* Status */
+    min-width: 80px;
+    width: 8%;
+}
+
+.table-resizable thead th:nth-child(4) { /* Current Action */
+    min-width: 200px;
+    width: 20%;
+}
+
+.table-resizable thead th:nth-child(5) { /* Last Log Line */
+    min-width: 300px;
+    width: 25%;
+}
+
+.table-resizable thead th:nth-child(6) { /* Progress */
+    min-width: 120px;
+    width: 10%;
+}
+
+.table-resizable thead th:nth-child(7) { /* Started */
+    min-width: 150px;
+    width: 12%;
+}
+
+.table-resizable thead th:nth-child(8) { /* Actions */
+    min-width: 100px;
+    width: 8%;
+}
+
+/* Ensure table doesn't collapse on initial render */
+.table-resizable {
+    min-width: 100%;
+}
+
+/* Sortable table styles */
+.table-sortable th.sortable {
+    cursor: pointer;
+    user-select: none;
+    position: relative;
+}
+
+.table-sortable th.sortable:hover {
+    background-color: #f8f9fa;
+}
+
+.table-sortable th.sortable i {
+    margin-left: 5px;
+    font-size: 0.8em;
+    opacity: 0.5;
+}
+
+.table-sortable th.sortable:hover i {
+    opacity: 1;
 }

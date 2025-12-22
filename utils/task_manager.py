@@ -52,7 +52,8 @@ class TaskManager:
             'run_scraper.py',
             'run_version_scraper.py',
             'run_downloader.py',
-            'run_description_downloader.py'
+            'run_description_downloader.py',
+            'run_index_search.py'
         }
 
         def run():
@@ -127,12 +128,15 @@ class TaskManager:
                     env['PYTHONPATH'] = base_dir
                 
                 # Run process
+                # Use UTF-8 encoding explicitly to avoid Windows charmap codec errors
                 process = subprocess.Popen(
                     cmd,
                     cwd=base_dir,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,  # Combine stderr into stdout for easier reading
                     text=True,
+                    encoding='utf-8',
+                    errors='replace',  # Replace invalid characters instead of failing
                     bufsize=1,
                     env=env,
                     shell=False
@@ -260,6 +264,12 @@ class TaskManager:
         if not download_media:
             args.append('--no-media')
         self._run_task(task_id, 'run_description_downloader.py', args)
+        return task_id
+    
+    def start_build_search_index(self) -> str:
+        """Start search index building task."""
+        task_id = f"build_index_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        self._run_task(task_id, 'run_index_search.py')
         return task_id
 
     def start_full_pipeline(
@@ -440,11 +450,21 @@ class TaskManager:
                 return False
             
             task = self.tasks[task_id]
+            current_status = task.get('status')
             
             # Check if task is running
-            if task.get('status') != 'running':
-                logger.warning(f"Task {task_id} is not running (status: {task.get('status')})")
-                return False
+            if current_status != 'running':
+                # If task is already completed/failed/cancelled, we can't cancel it
+                if current_status in ['completed', 'failed', 'cancelled']:
+                    logger.warning(f"Task {task_id} is already {current_status}, cannot cancel")
+                    return False
+                # For other statuses (e.g., 'pending'), mark as cancelled anyway
+                logger.info(f"Task {task_id} is not running (status: {current_status}), marking as cancelled")
+                self.tasks[task_id]['status'] = 'cancelled'
+                self.tasks[task_id]['message'] = f'Cancelled by user (was {current_status})'
+                self.tasks[task_id]['finished_at'] = datetime.now().isoformat()
+                self._save_status()
+                return True
             
             # Try to get process object
             process = self.processes.get(task_id)
@@ -513,9 +533,32 @@ class TaskManager:
                 pid = task.get('pid')
                 if pid:
                     try:
+                        # Check if process is still running (Windows)
                         if os.name == 'nt':  # Windows
+                            try:
+                                # Signal 0 doesn't kill, just checks if process exists
+                                os.kill(pid, 0)
+                            except ProcessLookupError:
+                                # Process already finished
+                                logger.warning(f"Task {task_id} process (PID {pid}) already finished")
+                                self.tasks[task_id]['status'] = 'cancelled'
+                                self.tasks[task_id]['message'] = 'Cancelled by user (process already finished)'
+                                self.tasks[task_id]['finished_at'] = datetime.now().isoformat()
+                                self._save_status()
+                                return True
+                            except PermissionError:
+                                # Process exists but we don't have permission
+                                logger.warning(f"Task {task_id} process (PID {pid}) exists but no permission to kill")
+                                # Mark as cancelled anyway
+                                self.tasks[task_id]['status'] = 'cancelled'
+                                self.tasks[task_id]['message'] = 'Cancelled by user (marked as cancelled)'
+                                self.tasks[task_id]['finished_at'] = datetime.now().isoformat()
+                                self._save_status()
+                                return True
+                            
+                            # Process exists, try to terminate it
                             os.kill(pid, signal.SIGTERM)
-                        else:
+                        else:  # Unix-like
                             os.kill(pid, signal.SIGTERM)
                         
                         self.tasks[task_id]['status'] = 'cancelled'
@@ -529,12 +572,33 @@ class TaskManager:
                         self._save_status()
                         logger.info(f"Task {task_id} cancelled via PID")
                         return True
+                    except ProcessLookupError:
+                        # Process already finished
+                        logger.warning(f"Task {task_id} process (PID {pid}) already finished")
+                        self.tasks[task_id]['status'] = 'cancelled'
+                        self.tasks[task_id]['message'] = 'Cancelled by user (process already finished)'
+                        self.tasks[task_id]['finished_at'] = datetime.now().isoformat()
+                        self._save_status()
+                        return True
                     except Exception as e:
                         logger.error(f"Failed to cancel task {task_id} via PID: {str(e)}")
-                        return False
+                        # Even if we can't kill the process, mark task as cancelled
+                        # This handles cases where process is already dead or we lost track of it
+                        self.tasks[task_id]['status'] = 'cancelled'
+                        self.tasks[task_id]['message'] = f'Cancelled by user (marked as cancelled, error: {str(e)})'
+                        self.tasks[task_id]['finished_at'] = datetime.now().isoformat()
+                        self._save_status()
+                        logger.info(f"Task {task_id} marked as cancelled despite error")
+                        return True
                 else:
-                    logger.warning(f"No process or PID found for task {task_id}")
-                    return False
+                    # No PID available, but task is marked as running
+                    # This can happen if task was loaded from file but process was lost
+                    logger.warning(f"Task {task_id} has no process object or PID, but status is 'running'. Marking as cancelled.")
+                    self.tasks[task_id]['status'] = 'cancelled'
+                    self.tasks[task_id]['message'] = 'Cancelled by user (process not found, likely already finished)'
+                    self.tasks[task_id]['finished_at'] = datetime.now().isoformat()
+                    self._save_status()
+                    return True
     
     def get_latest_task(self, task_type: str) -> Optional[Dict]:
         """Get latest task of specific type."""
@@ -585,6 +649,25 @@ class TaskManager:
             return None
         
         script = task.get('script', '')
+        
+        # For pipeline tasks, check the current step to determine which log to use
+        if script == 'pipeline':
+            current_step = task.get('current_step', 0)
+            # Pipeline steps:
+            # 1 = Scrape Apps -> scraper.log
+            # 2 = Scrape Versions -> scraper.log
+            # 3 = Download Binaries -> download.log
+            # 4 = Download Descriptions -> description_downloader.log
+            if current_step in [1, 2]:
+                return os.path.join(settings.LOGS_DIR, 'scraper.log')
+            elif current_step == 3:
+                return os.path.join(settings.LOGS_DIR, 'download.log')
+            elif current_step == 4:
+                return os.path.join(settings.LOGS_DIR, 'description_downloader.log')
+            else:
+                # Default to scraper.log for pipeline if step is unknown
+                return os.path.join(settings.LOGS_DIR, 'scraper.log')
+        
         log_file_map = {
             'run_scraper.py': 'scraper.log',
             'run_version_scraper.py': 'scraper.log',

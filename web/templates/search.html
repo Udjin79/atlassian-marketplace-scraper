@@ -1,0 +1,267 @@
+{% extends "base.html" %}
+
+{% block title %}Search - Atlassian Marketplace Scraper{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="{{ url_for('index') }}">Home</a></li>
+                <li class="breadcrumb-item active">Search</li>
+            </ol>
+        </nav>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header bg-primary text-white">
+                <h4 class="mb-0">
+                    <i class="bi bi-search"></i> Search Plugin Descriptions & Release Notes
+                </h4>
+            </div>
+            <div class="card-body">
+                <form id="search-form" onsubmit="performSearch(event)">
+                    <div class="input-group input-group-lg mb-3">
+                        <input type="text" 
+                               class="form-control" 
+                               id="search-query" 
+                               placeholder="Search for plugins (e.g., 'tables in jira', 'confluence automation')..."
+                               autocomplete="off"
+                               autofocus>
+                        <button class="btn btn-primary" type="submit">
+                            <i class="bi bi-search"></i> Search
+                        </button>
+                    </div>
+                    <small class="text-muted">
+                        <i class="bi bi-info-circle"></i> 
+                        Searches in plugin descriptions, highlights, and release notes
+                    </small>
+                </form>
+
+                <div id="search-results" style="display: none;">
+                    <hr>
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h5 id="results-count" class="mb-0"></h5>
+                        <button class="btn btn-sm btn-outline-secondary" onclick="clearSearch()">
+                            <i class="bi bi-x-circle"></i> Clear
+                        </button>
+                    </div>
+                    <div id="results-container"></div>
+                </div>
+
+                <div id="search-loading" style="display: none;">
+                    <div class="text-center py-4">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <p class="mt-2 text-muted">Searching...</p>
+                    </div>
+                </div>
+
+                <div id="search-empty" style="display: none;">
+                    <div class="alert alert-info">
+                        <i class="bi bi-info-circle"></i> 
+                        Enter a search query to find plugins
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let currentQuery = '';
+
+let searchTimeout = null;
+let currentSearchQuery = '';
+
+function performSearch(event) {
+    if (event) {
+        event.preventDefault();
+    }
+    
+    const query = document.getElementById('search-query').value.trim();
+    
+    if (!query) {
+        showEmpty();
+        currentSearchQuery = '';
+        return;
+    }
+
+    // Clear previous timeout
+    if (searchTimeout) {
+        clearTimeout(searchTimeout);
+    }
+    
+    // Prevent duplicate searches
+    if (currentSearchQuery === query) {
+        return;
+    }
+    
+    currentSearchQuery = query;
+    showLoading();
+    
+    // Clear any previous results immediately to prevent flickering
+    document.getElementById('results-container').innerHTML = '';
+    
+    fetch(`/api/search?q=${encodeURIComponent(query)}`)
+        .then(r => {
+            if (!r.ok) {
+                throw new Error(`HTTP ${r.status}: ${r.statusText}`);
+            }
+            return r.json();
+        })
+        .then(data => {
+            // Only update if this is still the current query
+            if (currentSearchQuery === query) {
+                if (data.success) {
+                    displayResults(data.results, data.total, query);
+                } else {
+                    showError(data.error || 'Search failed');
+                }
+            }
+        })
+        .catch(error => {
+            // Only show error if this is still the current query
+            if (currentSearchQuery === query) {
+                console.error('Search error:', error);
+                showError('Error performing search: ' + error.message);
+            }
+        });
+}
+
+function showLoading() {
+    document.getElementById('search-results').style.display = 'none';
+    document.getElementById('search-loading').style.display = 'block';
+    document.getElementById('search-empty').style.display = 'none';
+}
+
+function showEmpty() {
+    document.getElementById('search-results').style.display = 'none';
+    document.getElementById('search-loading').style.display = 'none';
+    document.getElementById('search-empty').style.display = 'block';
+}
+
+function showError(message) {
+    document.getElementById('search-results').style.display = 'block';
+    document.getElementById('search-loading').style.display = 'none';
+    document.getElementById('search-empty').style.display = 'none';
+    document.getElementById('results-container').innerHTML = 
+        `<div class="alert alert-danger"><i class="bi bi-exclamation-triangle"></i> ${escapeHtml(message)}</div>`;
+    document.getElementById('results-count').textContent = 'Error';
+}
+
+function displayResults(results, total, query) {
+    document.getElementById('search-results').style.display = 'block';
+    document.getElementById('search-loading').style.display = 'none';
+    document.getElementById('search-empty').style.display = 'none';
+    
+    const countEl = document.getElementById('results-count');
+    countEl.textContent = `${total} result${total !== 1 ? 's' : ''} found${query ? ` for "${escapeHtml(query)}"` : ''}`;
+    
+    const container = document.getElementById('results-container');
+    
+    if (results.length === 0) {
+        container.innerHTML = `
+            <div class="alert alert-warning">
+                <i class="bi bi-search"></i> 
+                No plugins found matching "${escapeHtml(query)}"
+            </div>
+        `;
+        return;
+    }
+    
+    let html = '<div class="list-group">';
+    
+    results.forEach(result => {
+        const addonKey = result.addon_key;
+        const appName = result.app_name;
+        const vendor = result.vendor;
+        const matchType = result.match_type;
+        const matchContext = result.match_context || '';
+        const releaseNotesContext = result.release_notes_context || '';
+        const products = result.products || [];
+        
+        // Build match type badge
+        let matchBadge = '';
+        if (matchType === 'description') {
+            matchBadge = '<span class="badge bg-info">Description</span>';
+        } else if (matchType === 'release_notes') {
+            matchBadge = '<span class="badge bg-warning">Release Notes</span>';
+        } else if (matchType === 'description_and_release_notes') {
+            matchBadge = '<span class="badge bg-info">Description</span> <span class="badge bg-warning">Release Notes</span>';
+        }
+        
+        // Build products badges
+        const productBadges = products.map(p => `<span class="badge bg-primary">${escapeHtml(p)}</span>`).join(' ');
+        
+        html += `
+            <div class="list-group-item">
+                <div class="d-flex w-100 justify-content-between align-items-start">
+                    <div class="flex-grow-1">
+                        <h5 class="mb-1">
+                            <a href="/apps/${encodeURIComponent(addonKey)}" class="text-decoration-none">
+                                ${escapeHtml(appName)}
+                            </a>
+                        </h5>
+                        <p class="mb-1">
+                            <small class="text-muted">
+                                <strong>Vendor:</strong> ${escapeHtml(vendor)} | 
+                                <strong>Key:</strong> <code>${escapeHtml(addonKey)}</code>
+                            </small>
+                        </p>
+                        <div class="mb-2">
+                            ${productBadges}
+                            ${matchBadge}
+                        </div>
+                        ${matchContext ? `<p class="mb-1 small text-muted"><em>${escapeHtml(matchContext)}</em></p>` : ''}
+                        ${releaseNotesContext ? `<p class="mb-1 small text-muted"><em>Release Notes: ${escapeHtml(releaseNotesContext)}</em></p>` : ''}
+                    </div>
+                    <div class="ms-3">
+                        <a href="/apps/${encodeURIComponent(addonKey)}" class="btn btn-sm btn-outline-primary">
+                            <i class="bi bi-info-circle"></i> View Details
+                        </a>
+                    </div>
+                </div>
+            </div>
+        `;
+    });
+    
+    html += '</div>';
+    container.innerHTML = html;
+}
+
+function clearSearch() {
+    document.getElementById('search-query').value = '';
+    document.getElementById('search-results').style.display = 'none';
+    document.getElementById('search-loading').style.display = 'none';
+    document.getElementById('search-empty').style.display = 'block';
+    currentQuery = '';
+    currentSearchQuery = '';
+    if (searchTimeout) {
+        clearTimeout(searchTimeout);
+    }
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// Allow Enter key to submit
+document.getElementById('search-query').addEventListener('keypress', function(e) {
+    if (e.key === 'Enter') {
+        performSearch(e);
+    }
+});
+
+// Show empty state on page load
+showEmpty();
+</script>
+{% endblock %}
+
