@@ -503,8 +503,12 @@ class DownloadManager:
                 result['by_disk'][drive]['bytes'] += disk_data['size']
                 result['by_disk'][drive]['file_count'] += disk_data['file_count']
             
-            # Add folder breakdown
+            # Add folder breakdown (filter out empty folders)
             for folder_path, folder_data in data['folders'].items():
+                # Skip empty folders (0 bytes and 0 files)
+                if folder_data['size'] == 0 and folder_data['file_count'] == 0:
+                    continue
+                    
                 folder_size_gb = folder_data['size'] / (1024 ** 3)
                 folder_size_mb = folder_data['size'] / (1024 ** 2)
                 result['categories'][category]['folders'].append({

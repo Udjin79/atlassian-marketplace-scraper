@@ -154,6 +154,19 @@ None - all changes are backward compatible
 - Improved error handling and user feedback
 - Better context extraction for matches
 
+### 9. Windows Launcher Scripts
+- Created `start.ps1` PowerShell script for easy Windows deployment
+- Created `start.bat` batch file as alternative launcher
+- Scripts automatically check and install dependencies
+- Scripts check/install Playwright browser
+- Scripts launch Flask application automatically
+- Fixed Windows encoding issues in index building (Unicode characters)
+
+### 10. Windows Encoding Fixes
+- Fixed Unicode encoding errors in `run_index_search.py` (replaced ✓ with [OK])
+- Added UTF-8 encoding configuration for Windows console in both `run_index_search.py` and `web/search_index_whoosh.py`
+- Ensures compatibility with Windows cp1252 console encoding
+
 ## Additional Technical Changes
 
 ### Files Modified
@@ -162,11 +175,13 @@ None - all changes are backward compatible
 - `web/templates/search.html`: New search page with Whoosh integration
 - `web/templates/base.html`: Added Search navigation link
 - `web/templates/manage.html`: Added "Build Search Index" task section with button and status display
-- `web/search_index_whoosh.py`: New module for Whoosh-based search indexing, added progress output
+- `web/search_index_whoosh.py`: New module for Whoosh-based search indexing, added progress output, fixed Windows encoding issues
 - `utils/task_manager.py`: Added `start_build_search_index()` method, added `run_index_search.py` to allowed scripts
-- `run_index_search.py`: New script for building search index with progress tracking
+- `run_index_search.py`: New script for building search index with progress tracking, fixed Windows encoding issues (Unicode characters)
 - `requirements.txt`: Added `whoosh==2.7.4` dependency
 - `SEARCH_LIBRARIES.md`: New documentation file explaining search library choice
+- `start.ps1`: New PowerShell launcher script for Windows (checks dependencies, installs if needed, runs app.py)
+- `start.bat`: New batch launcher script for Windows (alternative to PowerShell)
 
 ### API Changes
 - `app_detail()` route: Added `documentation_url` extraction and passing to template
@@ -188,4 +203,101 @@ None - all changes are backward compatible
 - Validated documentation button display logic
 - Tested release notes HTML rendering
 - Fixed disappearing search results issue
+
+## Additional Features (v2.2)
+
+### 11. Storage Table Filtering and Sorting
+- **Empty folder filtering**: Empty folders (0 MB, 0 files) are automatically hidden from storage statistics
+- **Table sorting**: Click column headers to sort by:
+  - Folder Path (alphabetical)
+  - Drive (alphabetical)
+  - Size (numerical, largest first)
+  - Files (numerical, most first)
+  - % of Category (numerical, highest first)
+- **Table filtering**: Search box to filter folders by path or drive
+- **Visual indicators**: Sort direction arrows (↑↓) show current sort state
+- **Applied to**: `/storage` page (All Folders by Category table)
+
+### 12. Descriptions Table Filtering and Sorting
+- **Table sorting**: Click column headers to sort by:
+  - App Name (alphabetical)
+  - Addon Key (alphabetical)
+  - Vendor (alphabetical)
+- **Table filtering**: Search box to filter by app name, addon key, or vendor
+- **Filter counter**: Shows "Showing X of Y apps" when filter is active
+- **Applied to**: `/descriptions` page
+
+### 13. Enhanced Search System
+- **Multi-level fallback search**:
+  1. Whoosh full-text search (if index exists)
+  2. Enhanced Search (searches all local data sources)
+  3. Simple Text Search (fallback for app names/vendors)
+- **Enhanced Search features**:
+  - Searches in app names, vendors, addon keys
+  - Searches in categories and products
+  - Searches in JSON descriptions (summary, overview, highlights)
+  - Searches in HTML descriptions (full page)
+  - Searches in release notes from database
+  - Relevance scoring system with weighted matches
+  - Context extraction around matches
+- **Improved error handling**: Better error messages and logging
+- **Search method indicator**: API returns which search method was used
+
+### 14. Smoke Tests
+- **Comprehensive test suite** (`tests/test_smoke.py`):
+  - MetadataStore tests (initialization, data retrieval)
+  - DownloadManager tests (storage statistics)
+  - Search functionality tests (Whoosh, Enhanced)
+  - File system tests (directory existence)
+  - Settings tests (configuration loading)
+  - Storage statistics structure tests
+- **Test runner script** (`run_smoke_tests.py`):
+  - Easy-to-use command-line interface
+  - Verbose output option
+  - Quick test mode (skip slow tests)
+  - Detailed error reporting
+- **Test documentation** (`tests/README.md`):
+  - Complete guide on running tests
+  - Explanation of what each test checks
+  - Troubleshooting guide
+
+## Additional Technical Changes (v2.2)
+
+### Files Modified
+- `scraper/download_manager.py`: Added filtering of empty folders (0 bytes, 0 files) in `get_detailed_storage_stats()`
+- `web/templates/storage_details.html`: Added sorting and filtering functionality, empty folder filtering in "Top Folders" section
+- `web/templates/descriptions_list.html`: Added sorting and filtering functionality, filter counter
+- `web/static/css/style.css`: Added styles for sortable tables (`.table-sortable`, hover effects, sort indicators)
+- `web/routes.py`: Added `List` and `Dict` imports, improved search API with multi-level fallback, added `_simple_text_search()` function
+- `web/search_index_whoosh.py`: Improved error handling, added empty index check, better query parsing with fallback, improved highlights extraction
+- `web/search_enhanced.py`: New module for comprehensive local data search
+
+### New Files
+- `web/search_enhanced.py`: Enhanced search implementation that searches across all local data sources
+- `tests/__init__.py`: Tests package initialization
+- `tests/test_smoke.py`: Comprehensive smoke test suite
+- `tests/test_search_api.py`: API-level search tests
+- `tests/README.md`: Test documentation
+- `run_smoke_tests.py`: Test runner script
+
+### API Changes
+- `/api/search`: Now uses multi-level fallback (Whoosh → Enhanced → Simple)
+- `/api/search`: Returns `method` field indicating which search method was used
+- `WhooshSearchIndex.search()`: Added empty index check, improved error handling, better query parsing
+- `EnhancedSearch.search_all()`: New method for comprehensive local data search
+- `_simple_text_search()`: New fallback function for basic text search
+
+### Data Format Changes
+- Storage statistics: Empty folders are filtered out before returning results
+- Search results: Include `method` field indicating search method used
+
+## Additional Testing (v2.2)
+- Tested empty folder filtering in storage statistics
+- Verified table sorting functionality (all sortable columns)
+- Tested table filtering (search boxes)
+- Validated multi-level search fallback system
+- Tested Enhanced Search across all data sources
+- Verified smoke tests run successfully
+- Tested search error handling and logging
+- Confirmed Whoosh search improvements (empty index check, query parsing fallback)
 

@@ -4,6 +4,18 @@ import sys
 import os
 from pathlib import Path
 
+# Fix encoding for Windows console (cp1252 doesn't support Unicode)
+if sys.platform == 'win32':
+    try:
+        # Try to set UTF-8 encoding for stdout/stderr
+        if hasattr(sys.stdout, 'reconfigure'):
+            sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        if hasattr(sys.stderr, 'reconfigure'):
+            sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        # Fallback: use ASCII-safe output
+        pass
+
 # Add project root to path
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
@@ -52,7 +64,7 @@ def main():
         
         print()
         print("=" * 60)
-        print(f"✓ Search index built successfully! Indexed {indexed_count} plugins")
+        print(f"[OK] Search index built successfully! Indexed {indexed_count} plugins")
         print("=" * 60)
         print()
         print(f"Index location: {search_index.index_dir}")

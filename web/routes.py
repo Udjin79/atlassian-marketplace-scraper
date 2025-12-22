@@ -2,6 +2,7 @@
 
 import os
 import re
+from typing import List, Dict
 from flask import render_template, jsonify, request, send_file, redirect, url_for
 from config import settings
 from config.products import PRODUCTS, PRODUCT_LIST
@@ -1323,7 +1324,7 @@ def register_routes(app):
 
     @app.route('/api/search')
     def api_search():
-        """Search API endpoint - searches in descriptions and release notes using Whoosh."""
+        """Search API endpoint - searches across all local data sources."""
         try:
             import sys
             from pathlib import Path
@@ -1331,7 +1332,6 @@ def register_routes(app):
             web_dir = Path(__file__).parent
             if str(web_dir) not in sys.path:
                 sys.path.insert(0, str(web_dir))
-            from search_index_whoosh import WhooshSearchIndex
             
             query = request.args.get('q', '').strip()
             if not query:
@@ -1340,28 +1340,91 @@ def register_routes(app):
                     'results': [],
                     'total': 0
                 })
-
-            # Initialize Whoosh search index
-            search_index = WhooshSearchIndex()
             
-            # Rebuild index if it doesn't exist
-            if search_index.needs_rebuild():
-                logger.info("Whoosh index not found, building...")
-                search_index.build_index(store)
+            # Try Whoosh first (faster if index exists)
+            use_whoosh = request.args.get('use_whoosh', 'true').lower() == 'true'
+            results = []
+            search_method = 'unknown'
             
-            # Perform search using Whoosh
-            results = search_index.search(query, store, limit=100)
+            if use_whoosh:
+                try:
+                    from search_index_whoosh import WhooshSearchIndex
+                    search_index = WhooshSearchIndex()
+                    
+                    # Check if index exists
+                    if not search_index.needs_rebuild():
+                        # Index exists, use Whoosh
+                        logger.info(f"Using Whoosh search for query: '{query}'")
+                        results = search_index.search(query, store, limit=100)
+                        search_method = 'whoosh'
+                        logger.info(f"Whoosh search returned {len(results)} results")
+                    else:
+                        # Index doesn't exist, fall back to enhanced search
+                        logger.info("Whoosh index not found, using enhanced search")
+                        use_whoosh = False
+                except Exception as e:
+                    logger.warning(f"Whoosh search failed, falling back to enhanced search: {str(e)}", exc_info=True)
+                    use_whoosh = False
+            
+            # Fallback to enhanced search if Whoosh not available or failed
+            if not use_whoosh or len(results) == 0:
+                try:
+                    from search_enhanced import EnhancedSearch
+                    logger.info(f"Using Enhanced search for query: '{query}'")
+                    enhanced_search = EnhancedSearch()
+                    results = enhanced_search.search_all(query, store, limit=100)
+                    search_method = 'enhanced'
+                    logger.info(f"Enhanced search returned {len(results)} results")
+                except Exception as e:
+                    logger.error(f"Enhanced search failed: {str(e)}", exc_info=True)
+                    # Last resort: simple text search
+                    logger.info(f"Using simple text search for query: '{query}'")
+                    results = _simple_text_search(query, store, limit=100)
+                    search_method = 'simple'
+                    logger.info(f"Simple search returned {len(results)} results")
             
             return jsonify({
                 'success': True,
                 'results': results,
                 'total': len(results),
-                'query': query
+                'query': query,
+                'method': search_method
             })
 
         except Exception as e:
             logger.error(f"Error in search: {str(e)}", exc_info=True)
             return jsonify({'success': False, 'error': str(e)}), 500
+
+
+def _simple_text_search(query: str, metadata_store, limit: int = 100) -> List[Dict]:
+    """Simple fallback text search."""
+    query_lower = query.lower().strip()
+    results = []
+    
+    try:
+        apps = metadata_store.get_all_apps()
+        for app in apps:
+            addon_key = app.get('addon_key', '')
+            app_name = (app.get('name') or '').lower()
+            vendor = (app.get('vendor') or '').lower()
+            
+            if query_lower in app_name or query_lower in vendor or query_lower in addon_key.lower():
+                results.append({
+                    'addon_key': addon_key,
+                    'app_name': app.get('name', 'Unknown'),
+                    'vendor': app.get('vendor', 'N/A'),
+                    'products': app.get('products', []),
+                    'score': 1,
+                    'match_type': 'metadata',
+                    'match_context': f"Matched in app name, vendor, or key"
+                })
+                
+                if len(results) >= limit:
+                    break
+    except Exception as e:
+        logger.error(f"Simple text search failed: {str(e)}")
+    
+    return results
 
     @app.route('/api/tasks/start/build-index', methods=['POST'])
     @requires_auth

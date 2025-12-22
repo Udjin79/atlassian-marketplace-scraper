@@ -1257,8 +1257,8 @@ function renderTasksTable(container, tasks, loadLogs = false) {
         return;
     }
     
-    let html = '<div class="table-responsive"><table class="table table-hover table-sm table-resizable">';
-    html += '<thead><tr><th>Task ID</th><th>Script</th><th>Status</th><th>Current Action</th><th>Last Log Line</th><th>Progress</th><th>Started</th><th>Actions</th></tr></thead><tbody>';
+    let html = '<div class="table-responsive"><table class="table table-hover table-sm table-resizable" style="table-layout: fixed; width: 100%; min-width: 1300px;">';
+    html += '<thead><tr><th style="min-width: 200px; width: 15%;">Task ID</th><th style="min-width: 150px; width: 12%;">Script</th><th style="min-width: 80px; width: 8%;">Status</th><th style="min-width: 200px; width: 20%;">Current Action</th><th style="min-width: 300px; width: 25%;">Last Log Line</th><th style="min-width: 120px; width: 10%;">Progress</th><th style="min-width: 150px; width: 12%;">Started</th><th style="min-width: 100px; width: 8%;">Actions</th></tr></thead><tbody>';
     
     tasks.forEach(([taskId, task]) => {
         const statusBadge = task.status === 'completed' ? 'bg-success' :

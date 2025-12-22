@@ -77,9 +77,22 @@ class WhooshSearchIndex:
     
     def build_index(self, metadata_store):
         """Build search index from all descriptions and release notes."""
+        import sys
+        
+        # Fix encoding for Windows console (cp1252 doesn't support Unicode)
+        if sys.platform == 'win32':
+            try:
+                # Try to set UTF-8 encoding for stdout/stderr
+                if hasattr(sys.stdout, 'reconfigure'):
+                    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+                if hasattr(sys.stderr, 'reconfigure'):
+                    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+            except Exception:
+                # Fallback: use ASCII-safe output
+                pass
+        
         logger.info("Building Whoosh search index...")
         print("Building Whoosh search index...")
-        import sys
         sys.stdout.flush()
         
         # Create new index
@@ -250,10 +263,17 @@ class WhooshSearchIndex:
         try:
             idx = self._get_index()
             
+            # Check if index has any documents
+            with idx.searcher() as test_searcher:
+                doc_count = test_searcher.doc_count()
+                if doc_count == 0:
+                    logger.warning(f"Whoosh index is empty (0 documents), cannot search")
+                    return []
+            
             # Use MultifieldParser to search across multiple fields
             # This allows searching in all_text, json_text, html_text, and release_notes_text
             parser = MultifieldParser(
-                ["all_text", "json_text", "html_text", "release_notes_text"],
+                ["all_text", "json_text", "html_text", "release_notes_text", "app_name", "vendor"],
                 schema=idx.schema,
                 group=OrGroup  # Use OR for multiple fields (match in any field)
             )
@@ -263,63 +283,104 @@ class WhooshSearchIndex:
             # - Phrases: "table grid"
             # - Wildcards: "table*"
             # - Boolean: "table AND grid", "table OR grid"
-            parsed_query = parser.parse(query)
+            try:
+                parsed_query = parser.parse(query)
+            except Exception as parse_error:
+                logger.warning(f"Whoosh query parsing failed for '{query}': {str(parse_error)}, trying simple term search")
+                # Fallback: try simple term search
+                from whoosh.query import Term, Or
+                query_terms = query.lower().split()
+                if query_terms:
+                    term_queries = []
+                    for term in query_terms:
+                        # Try searching in all_text field
+                        term_queries.append(Term("all_text", term))
+                    parsed_query = Or(term_queries) if len(term_queries) > 1 else term_queries[0]
+                else:
+                    return []
             
             with idx.searcher() as searcher:
                 results_list = searcher.search(parsed_query, limit=limit)
+                logger.debug(f"Whoosh search for '{query}' returned {len(results_list)} results")
                 
                 results = []
                 for hit in results_list:
-                    addon_key = hit['addon_key']
-                    app = metadata_store.get_app_by_key(addon_key)
-                    if not app:
+                    try:
+                        addon_key = hit.get('addon_key')
+                        if not addon_key:
+                            continue
+                        
+                        app = metadata_store.get_app_by_key(addon_key)
+                        if not app:
+                            logger.debug(f"App not found for addon_key: {addon_key}")
+                            continue
+                        
+                        # Determine match type based on which fields matched
+                        match_type = 'description'
+                        match_context = ''
+                        release_notes_context = ''
+                        
+                        # Check which fields have content
+                        json_text = hit.get('json_text', '') or ''
+                        html_text = hit.get('html_text', '') or ''
+                        release_notes_text = hit.get('release_notes_text', '') or ''
+                        
+                        # Try to extract context from matched fields
+                        # Whoosh highlights are available via hit.highlights()
+                        try:
+                            highlights = hit.highlights('all_text', top=1)
+                            if highlights:
+                                match_context = highlights
+                        except Exception:
+                            pass
+                        
+                        if not match_context:
+                            # Try highlights from other fields
+                            for field in ['json_text', 'html_text', 'release_notes_text']:
+                                try:
+                                    highlights = hit.highlights(field, top=1)
+                                    if highlights:
+                                        match_context = highlights
+                                        break
+                                except Exception:
+                                    pass
+                        
+                        # Fallback to text snippets
+                        if not match_context:
+                            if json_text:
+                                match_context = json_text[:300] + '...' if len(json_text) > 300 else json_text
+                            elif html_text:
+                                match_context = html_text[:300] + '...' if len(html_text) > 300 else html_text
+                        
+                        if release_notes_text:
+                            release_notes_context = release_notes_text[:300] + '...' if len(release_notes_text) > 300 else release_notes_text
+                            if match_type == 'description':
+                                match_type = 'description_and_release_notes'
+                            elif not json_text and not html_text:
+                                match_type = 'release_notes'
+                        
+                        result = {
+                            'addon_key': addon_key,
+                            'app_name': hit.get('app_name') or app.get('name', 'Unknown'),
+                            'vendor': hit.get('vendor') or app.get('vendor', 'N/A'),
+                            'match_type': match_type,
+                            'match_context': match_context or 'Found in description',
+                            'products': app.get('products', []),
+                            'score': hit.score  # Relevance score from Whoosh
+                        }
+                        
+                        if release_notes_context:
+                            result['release_notes_context'] = release_notes_context
+                        
+                        results.append(result)
+                    except Exception as hit_error:
+                        logger.warning(f"Error processing search hit: {str(hit_error)}")
                         continue
-                    
-                    # Determine match type based on which fields matched
-                    match_type = 'description'
-                    match_context = ''
-                    release_notes_context = ''
-                    
-                    # Check which fields have content
-                    json_text = hit.get('json_text', '')
-                    html_text = hit.get('html_text', '')
-                    release_notes_text = hit.get('release_notes_text', '')
-                    
-                    # Try to extract context from matched fields
-                    # Whoosh highlights are available via hit.highlights()
-                    highlights = hit.highlights('all_text', top=1)
-                    if highlights:
-                        match_context = highlights
-                    elif json_text:
-                        match_context = json_text[:300] + '...' if len(json_text) > 300 else json_text
-                    elif html_text:
-                        match_context = html_text[:300] + '...' if len(html_text) > 300 else html_text
-                    
-                    if release_notes_text:
-                        release_notes_context = release_notes_text[:300] + '...' if len(release_notes_text) > 300 else release_notes_text
-                        if match_type == 'description':
-                            match_type = 'description_and_release_notes'
-                        elif not json_text and not html_text:
-                            match_type = 'release_notes'
-                    
-                    result = {
-                        'addon_key': addon_key,
-                        'app_name': hit.get('app_name', 'Unknown'),
-                        'vendor': hit.get('vendor', 'N/A'),
-                        'match_type': match_type,
-                        'match_context': match_context or 'Found in description',
-                        'products': app.get('products', []),
-                        'score': hit.score  # Relevance score from Whoosh
-                    }
-                    
-                    if release_notes_context:
-                        result['release_notes_context'] = release_notes_context
-                    
-                    results.append(result)
                 
                 # Sort by relevance score (highest first)
                 results.sort(key=lambda x: x.get('score', 0), reverse=True)
                 
+                logger.debug(f"Whoosh search completed, returning {len(results)} results")
                 return results
                 
         except Exception as e:

@@ -59,17 +59,33 @@ AtlassianMarketplaceScraper/
 
 ### Quick Setup (Windows)
 
-**Automated installation script:**
+**Option 1: Install and Run (Recommended)**
 ```powershell
+# Run the launcher script (installs dependencies if needed and starts the app)
+.\start.ps1
+```
+
+Or double-click `start.bat` in Windows Explorer.
+
+**Option 2: Install Only**
+```powershell
+# Run the installer script
 .\install.ps1
 ```
 
-The script will:
+The installer script will:
 - Check Python installation
 - Create virtual environment
 - Install all dependencies
 - Create `.env` file with configuration
 - Generate SECRET_KEY automatically
+
+The launcher script (`start.ps1` or `start.bat`) will:
+- Check Python installation
+- Create virtual environment if needed
+- Install dependencies if needed
+- Check/install Playwright browser
+- Launch the Flask web application automatically
 
 See [SETUP_GUIDE.md](SETUP_GUIDE.md) for detailed instructions.
 

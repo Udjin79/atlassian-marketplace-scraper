@@ -197,3 +197,70 @@ main {
 .table-resizable th:last-child .resizer {
     display: none;
 }
+
+/* Tasks table specific styles - prevent narrow columns on initial render */
+.table-resizable thead th:nth-child(1) { /* Task ID */
+    min-width: 200px;
+    width: 15%;
+}
+
+.table-resizable thead th:nth-child(2) { /* Script */
+    min-width: 150px;
+    width: 12%;
+}
+
+.table-resizable thead th:nth-child(3) { /* Status */
+    min-width: 80px;
+    width: 8%;
+}
+
+.table-resizable thead th:nth-child(4) { /* Current Action */
+    min-width: 200px;
+    width: 20%;
+}
+
+.table-resizable thead th:nth-child(5) { /* Last Log Line */
+    min-width: 300px;
+    width: 25%;
+}
+
+.table-resizable thead th:nth-child(6) { /* Progress */
+    min-width: 120px;
+    width: 10%;
+}
+
+.table-resizable thead th:nth-child(7) { /* Started */
+    min-width: 150px;
+    width: 12%;
+}
+
+.table-resizable thead th:nth-child(8) { /* Actions */
+    min-width: 100px;
+    width: 8%;
+}
+
+/* Ensure table doesn't collapse on initial render */
+.table-resizable {
+    min-width: 100%;
+}
+
+/* Sortable table styles */
+.table-sortable th.sortable {
+    cursor: pointer;
+    user-select: none;
+    position: relative;
+}
+
+.table-sortable th.sortable:hover {
+    background-color: #f8f9fa;
+}
+
+.table-sortable th.sortable i {
+    margin-left: 5px;
+    font-size: 0.8em;
+    opacity: 0.5;
+}
+
+.table-sortable th.sortable:hover i {
+    opacity: 1;
+}
