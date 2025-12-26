@@ -72,6 +72,7 @@ class MetadataStoreSQLite:
                     release_notes TEXT,
                     summary TEXT,
                     compatible_products TEXT,
+                    compatibility TEXT,
                     hosting_type TEXT,
                     download_url TEXT,
                     file_name TEXT,
@@ -85,6 +86,14 @@ class MetadataStoreSQLite:
                     UNIQUE(addon_key, version_id)
                 )
             """)
+
+            # Migration: Add compatibility column if it doesn't exist
+            try:
+                conn.execute("ALTER TABLE versions ADD COLUMN compatibility TEXT")
+                logger.info("Added compatibility column to versions table")
+            except sqlite3.OperationalError:
+                # Column already exists
+                pass
 
             # Create parent_software_versions table
             conn.execute("""
