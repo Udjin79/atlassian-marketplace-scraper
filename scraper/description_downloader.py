@@ -1430,7 +1430,8 @@ class DescriptionDownloader:
             logger.debug(f"Failed to download asset {url}: {str(e)}")
             return None
 
-    def download_all_descriptions(self, download_media: bool = True, limit: Optional[int] = None, use_full_page: bool = True):
+    def download_all_descriptions(self, download_media: bool = True, limit: Optional[int] = None,
+                                    use_full_page: bool = True, max_workers: int = 3):
         """
         Download descriptions for all apps in database.
 
@@ -1438,87 +1439,124 @@ class DescriptionDownloader:
             download_media: Download media files
             limit: Optional limit on number of apps to process
             use_full_page: Download full HTML page instead of API-based description
+            max_workers: Number of parallel workers (default 3)
         """
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        from threading import Lock
+
         apps = self.store.get_all_apps(limit=limit)
         total = len(apps)
-        logger.info(f"Starting description download for {total} apps (full_page={use_full_page})")
 
+        print(f"[*] Starting parallel description download for {total} apps ({max_workers} workers)...")
+        logger.info(f"Starting description download for {total} apps (full_page={use_full_page}, workers={max_workers})")
+
+        # Thread-safe counters
         success_count = 0
         fail_count = 0
+        completed_count = 0
+        lock = Lock()
 
-        # Use PlaywrightBrowserManager for browser reuse if downloading full pages
-        # This is MUCH faster than creating a new browser for each page
+        # Thread-local storage for browser pages
+        import threading
+        thread_local = threading.local()
+
+        # Shared browser context (if using full page mode)
         browser_manager = None
         if use_full_page:
             try:
                 from scraper.page_saver_integrated import PlaywrightBrowserManager
                 browser_manager = PlaywrightBrowserManager()
-            except ImportError:
-                logger.warning("PlaywrightBrowserManager not available, will create new browser for each page")
-
-        try:
-            # Start the browser if available
-            if browser_manager:
                 browser_manager.__enter__()
-                self._playwright_page = browser_manager.page
-                if self._playwright_page:
-                    logger.info("Browser reuse enabled - this will be MUCH faster")
+                if browser_manager.is_available:
+                    logger.info(f"Browser started, creating {max_workers} pages for parallel downloads")
                 else:
-                    logger.warning("Browser reuse not available, falling back to new browser per page")
+                    logger.warning("Browser not available, falling back to sequential mode")
+                    browser_manager = None
+            except ImportError:
+                logger.warning("PlaywrightBrowserManager not available")
+                browser_manager = None
 
-            for idx, app in enumerate(apps, 1):
-                addon_key = app.get('addon_key')
-                marketplace_url_raw = app.get('marketplace_url')
+        def get_thread_page():
+            """Get or create a browser page for the current thread."""
+            if not hasattr(thread_local, 'page'):
+                if browser_manager and browser_manager._context:
+                    thread_local.page = browser_manager._context.new_page()
+                    logger.debug(f"Created new page for thread {threading.current_thread().name}")
+                else:
+                    thread_local.page = None
+            return thread_local.page
 
-                if not addon_key:
-                    continue
+        def download_single_app(app_info):
+            """Download description for a single app (thread-safe)."""
+            nonlocal success_count, fail_count, completed_count
 
-                # Print progress to stdout for task manager progress bar
-                print(f"{idx}/{total} Downloading: {addon_key}")
-                logger.info(f"[{idx}/{total}] Downloading description for {addon_key}")
+            idx, app = app_info
+            addon_key = app.get('addon_key')
 
-                # Handle marketplace_url - can be string or dict
-                marketplace_url = None
-                if marketplace_url_raw:
-                    if isinstance(marketplace_url_raw, dict):
-                        marketplace_url = marketplace_url_raw.get('href', '')
-                    elif isinstance(marketplace_url_raw, str):
-                        marketplace_url = marketplace_url_raw.strip()
+            if not addon_key:
+                return ('skip', None, None)
 
-                # If marketplace_url is empty, construct it
-                if not marketplace_url:
-                    logger.debug(f"marketplace_url is empty for {addon_key}, will construct URL")
-                    marketplace_url = f"https://marketplace.atlassian.com/apps/{addon_key}?hosting=datacenter&tab=overview"
+            # Get marketplace_url
+            marketplace_url_raw = app.get('marketplace_url')
+            marketplace_url = None
+            if marketplace_url_raw:
+                if isinstance(marketplace_url_raw, dict):
+                    marketplace_url = marketplace_url_raw.get('href', '')
+                elif isinstance(marketplace_url_raw, str):
+                    marketplace_url = marketplace_url_raw.strip()
 
-                # Always use download_description - it handles both full_page and API
-                # If use_full_page=True, it will download full_page + API
-                # If use_full_page=False, it will only download API
+            if not marketplace_url:
+                marketplace_url = f"https://marketplace.atlassian.com/apps/{addon_key}?hosting=datacenter&tab=overview"
+
+            try:
+                # Get thread-local browser page
+                page = get_thread_page()
+
+                # Temporarily set the page for this download
+                old_page = self._playwright_page
+                self._playwright_page = page
+
                 try:
                     json_path, html_path = self.download_description(
                         addon_key,
                         download_media=download_media,
                         marketplace_url=marketplace_url if use_full_page else None
                     )
+                finally:
+                    self._playwright_page = old_page
 
+                with lock:
+                    completed_count += 1
                     if json_path or html_path:
                         success_count += 1
-                        print(f"{idx}/{total} [OK] {addon_key}")
+                        print(f"{completed_count}/{total} [OK] {addon_key}")
                         logger.info(f"[OK] Success: {addon_key}")
-                        if json_path:
-                            logger.debug(f"  JSON: {json_path}")
-                        if html_path:
-                            logger.debug(f"  HTML: {html_path}")
+                        return ('success', addon_key, html_path)
                     else:
                         fail_count += 1
-                        print(f"{idx}/{total} [FAIL] {addon_key}")
+                        print(f"{completed_count}/{total} [FAIL] {addon_key}")
                         logger.warning(f"[ERROR] Failed: {addon_key}")
-                except KeyboardInterrupt:
-                    logger.warning(f"Download interrupted by user at {addon_key}")
-                    raise
-                except Exception as e:
+                        return ('fail', addon_key, None)
+
+            except Exception as e:
+                with lock:
+                    completed_count += 1
                     fail_count += 1
-                    print(f"{idx}/{total} [ERROR] {addon_key}")
-                    logger.error(f"[ERROR] Exception downloading {addon_key}: {e}")
+                    print(f"{completed_count}/{total} [ERROR] {addon_key}")
+                logger.error(f"[ERROR] Exception downloading {addon_key}: {e}")
+                return ('error', addon_key, str(e))
+
+        try:
+            # Process apps in parallel
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = {executor.submit(download_single_app, (idx, app)): app
+                          for idx, app in enumerate(apps, 1)}
+
+                for future in as_completed(futures):
+                    try:
+                        future.result()
+                    except Exception as e:
+                        logger.error(f"Worker exception: {e}")
 
         finally:
             # Clean up browser

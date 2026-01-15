@@ -50,6 +50,12 @@ def main():
         action='store_true',
         help='Use API-based description instead of full HTML page'
     )
+    parser.add_argument(
+        '--workers',
+        type=int,
+        default=3,
+        help='Number of parallel workers (default: 3)'
+    )
 
     args = parser.parse_args()
 
@@ -170,12 +176,14 @@ def main():
             print(f"Limit: {args.limit} apps")
         print(f"Download media: {args.download_media}")
         print(f"Use full HTML page: {not args.use_api}")
+        print(f"Workers: {args.workers}")
         print()
 
         downloader.download_all_descriptions(
             download_media=args.download_media,
             limit=args.limit,
-            use_full_page=not args.use_api
+            use_full_page=not args.use_api,
+            max_workers=args.workers
         )
 
     print("\n✔ Description download completed!")
