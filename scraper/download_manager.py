@@ -15,6 +15,40 @@ from utils.logger import get_logger
 logger = get_logger('download')
 
 
+def _filter_overlapping_paths(paths):
+    """
+    Filter out paths that are subdirectories of other paths in the list.
+
+    This prevents double/triple counting when both parent and child directories
+    are included (e.g., /data/binaries and /data/binaries/jira).
+
+    Args:
+        paths: Iterable of path strings
+
+    Returns:
+        Set of non-overlapping paths (keeps parent, removes children)
+    """
+    paths = [os.path.normpath(p) for p in paths if p]
+    result = set()
+
+    for path in paths:
+        # Check if this path is a subdirectory of any path already in result
+        is_subdir = False
+        for existing in list(result):
+            # Check if path is under existing (existing is parent)
+            if path.startswith(existing + os.sep) or path == existing:
+                is_subdir = True
+                break
+            # Check if existing is under path (path is parent) - remove existing
+            if existing.startswith(path + os.sep):
+                result.discard(existing)
+
+        if not is_subdir:
+            result.add(path)
+
+    return result
+
+
 class DownloadManager:
     """Manages downloading of app version binaries."""
 
@@ -288,19 +322,22 @@ class DownloadManager:
         
         # Get all directories to check (product-specific + base fallback)
         directories_to_check = set()
-        
+
         # Add all product-specific directories
         for product_dir in settings.PRODUCT_STORAGE_MAP.values():
             if os.path.exists(product_dir):
                 directories_to_check.add(product_dir)
-        
+
         # Also check base directory as fallback
         if os.path.exists(settings.BINARIES_BASE_DIR):
             directories_to_check.add(settings.BINARIES_BASE_DIR)
-        
+
         # If no product-specific dirs exist, check default
         if not directories_to_check and os.path.exists(settings.BINARIES_DIR):
             directories_to_check.add(settings.BINARIES_DIR)
+
+        # Filter out overlapping paths to prevent double-counting
+        directories_to_check = _filter_overlapping_paths(directories_to_check)
 
         # Walk through all directories
         for directory in directories_to_check:
@@ -390,22 +427,25 @@ class DownloadManager:
         }
         
         # Add binaries directories
+        binaries_paths = []
         for product_dir in settings.PRODUCT_STORAGE_MAP.values():
             if os.path.exists(product_dir):
-                categories['binaries']['paths'].append(product_dir)
+                binaries_paths.append(product_dir)
         if os.path.exists(settings.BINARIES_BASE_DIR):
-            categories['binaries']['paths'].append(settings.BINARIES_BASE_DIR)
+            binaries_paths.append(settings.BINARIES_BASE_DIR)
         if os.path.exists(settings.BINARIES_DIR):
-            categories['binaries']['paths'].append(settings.BINARIES_DIR)
-        
+            binaries_paths.append(settings.BINARIES_DIR)
+        # Filter out overlapping paths to prevent double/triple-counting
+        categories['binaries']['paths'] = list(_filter_overlapping_paths(binaries_paths))
+
         # Add descriptions directory
         if os.path.exists(settings.DESCRIPTIONS_DIR):
             categories['descriptions']['paths'].append(settings.DESCRIPTIONS_DIR)
-        
+
         # Add metadata directory
         if os.path.exists(settings.METADATA_DIR):
             categories['metadata']['paths'].append(settings.METADATA_DIR)
-        
+
         # Calculate stats for each category
         for category, data in categories.items():
             for path in data['paths']:
