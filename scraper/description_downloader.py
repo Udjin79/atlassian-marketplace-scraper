@@ -1526,9 +1526,7 @@ class DescriptionDownloader:
             if browser_manager:
                 browser_manager.__exit__(None, None, None)
 
-        print(f"\n[OK] Description download complete!")
-        print(f"   Success: {success_count}")
-        print(f"   Failed: {fail_count}")
+        print(f"\n[OK] Description download completed successfully! ({success_count} success, {fail_count} failed)")
         logger.info(f"Description download complete: {success_count} success, {fail_count} failed")
 
     def save_marketplace_page_with_playwright(
