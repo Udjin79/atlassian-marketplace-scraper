@@ -96,23 +96,37 @@ def _safe_filename_from_url(url: str, content_type: Optional[str] = None) -> str
     return base
 
 
-def _worker_process_batch(batch):
+def _worker_process_batch(args):
     """
     Worker function for multiprocessing - processes a batch of apps.
     Each worker process creates its own browser and reuses it for all items in the batch.
     Must be at module level to be picklable.
+
+    Args is a tuple: (batch, shared_counters) where shared_counters contains
+    Manager-based shared values for global progress tracking.
     """
     import sys
     # Ensure unbuffered output in worker process
     sys.stdout.reconfigure(line_buffering=True) if hasattr(sys.stdout, 'reconfigure') else None
 
+    batch, shared_counters = args
+
     if not batch:
         return {'success': 0, 'fail': 0, 'skip': 0}
 
+    # Local counters for return value
     success = 0
     fail = 0
     skip = 0
-    total = batch[0]['total']  # Total across all batches
+
+    # Shared counters for global progress
+    total = shared_counters['total']
+    completed = shared_counters['completed']
+    global_skip = shared_counters['skip']
+    global_success = shared_counters['success']
+    global_fail = shared_counters['fail']
+    lock = shared_counters['lock']
+
     use_full_page = batch[0]['use_full_page']
 
     # Create downloader with its own browser for this process
@@ -134,12 +148,14 @@ def _worker_process_batch(batch):
     try:
         for item in batch:
             addon_key = item['addon_key']
-            idx = item['idx']
 
             # Skip if description already exists
             if downloader.description_exists(addon_key, use_full_page=use_full_page):
                 skip += 1
-                print(f"{idx}/{total} ({skip} skipped, {success} OK) {addon_key}", flush=True)
+                with lock:
+                    completed.value += 1
+                    global_skip.value += 1
+                    print(f"{completed.value}/{total} ({global_skip.value} skipped, {global_success.value} OK) {addon_key}", flush=True)
                 logger.debug(f"[SKIP] Description already exists: {addon_key}")
                 continue
 
@@ -152,16 +168,25 @@ def _worker_process_batch(batch):
 
                 if json_path or html_path:
                     success += 1
-                    print(f"{idx}/{total} ({skip} skipped, {success} OK) {addon_key}", flush=True)
+                    with lock:
+                        completed.value += 1
+                        global_success.value += 1
+                        print(f"{completed.value}/{total} ({global_skip.value} skipped, {global_success.value} OK) {addon_key}", flush=True)
                     logger.info(f"[OK] Success: {addon_key}")
                 else:
                     fail += 1
-                    print(f"{idx}/{total} ({skip} skipped, {success} OK, {fail} failed) {addon_key}", flush=True)
+                    with lock:
+                        completed.value += 1
+                        global_fail.value += 1
+                        print(f"{completed.value}/{total} ({global_skip.value} skipped, {global_success.value} OK, {global_fail.value} failed) {addon_key}", flush=True)
                     logger.warning(f"[ERROR] Failed: {addon_key}")
 
             except Exception as e:
                 fail += 1
-                print(f"{idx}/{total} ({skip} skipped, {success} OK, {fail} failed) {addon_key}", flush=True)
+                with lock:
+                    completed.value += 1
+                    global_fail.value += 1
+                    print(f"{completed.value}/{total} ({global_skip.value} skipped, {global_success.value} OK, {global_fail.value} failed) {addon_key}", flush=True)
                 logger.error(f"[ERROR] Exception downloading {addon_key}: {e}")
 
     finally:
@@ -1770,13 +1795,27 @@ class DescriptionDownloader:
                 for i, item in enumerate(work_items):
                     batches[i % max_workers].append(item)
 
-            pool = Pool(processes=max_workers)
-            try:
-                results = pool.map(_worker_process_batch, batches)
-            finally:
-                pool.close()
-                pool.join()
-                pool = None
+            # Create shared counters for global progress tracking across all workers
+            with Manager() as manager:
+                shared_counters = {
+                    'total': total,
+                    'completed': manager.Value('i', 0),
+                    'skip': manager.Value('i', 0),
+                    'success': manager.Value('i', 0),
+                    'fail': manager.Value('i', 0),
+                    'lock': manager.Lock()
+                }
+
+                # Create batch args as tuples of (batch, shared_counters)
+                batch_args = [(batch, shared_counters) for batch in batches]
+
+                pool = Pool(processes=max_workers)
+                try:
+                    results = pool.map(_worker_process_batch, batch_args)
+                finally:
+                    pool.close()
+                    pool.join()
+                    pool = None
 
             # Aggregate results
             success_count = sum(r['success'] for r in results)
