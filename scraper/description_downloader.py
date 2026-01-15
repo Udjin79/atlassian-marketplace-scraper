@@ -1473,6 +1473,8 @@ class DescriptionDownloader:
                 if not addon_key:
                     continue
 
+                # Print progress to stdout for task manager progress bar
+                print(f"{idx}/{total} Downloading: {addon_key}")
                 logger.info(f"[{idx}/{total}] Downloading description for {addon_key}")
 
                 # Handle marketplace_url - can be string or dict
@@ -1500,6 +1502,7 @@ class DescriptionDownloader:
 
                     if json_path or html_path:
                         success_count += 1
+                        print(f"{idx}/{total} [OK] {addon_key}")
                         logger.info(f"[OK] Success: {addon_key}")
                         if json_path:
                             logger.debug(f"  JSON: {json_path}")
@@ -1507,12 +1510,14 @@ class DescriptionDownloader:
                             logger.debug(f"  HTML: {html_path}")
                     else:
                         fail_count += 1
+                        print(f"{idx}/{total} [FAIL] {addon_key}")
                         logger.warning(f"[ERROR] Failed: {addon_key}")
                 except KeyboardInterrupt:
                     logger.warning(f"Download interrupted by user at {addon_key}")
                     raise
                 except Exception as e:
                     fail_count += 1
+                    print(f"{idx}/{total} [ERROR] {addon_key}")
                     logger.error(f"[ERROR] Exception downloading {addon_key}: {e}")
 
         finally:
@@ -1521,6 +1526,9 @@ class DescriptionDownloader:
             if browser_manager:
                 browser_manager.__exit__(None, None, None)
 
+        print(f"\n[OK] Description download complete!")
+        print(f"   Success: {success_count}")
+        print(f"   Failed: {fail_count}")
         logger.info(f"Description download complete: {success_count} success, {fail_count} failed")
 
     def save_marketplace_page_with_playwright(
