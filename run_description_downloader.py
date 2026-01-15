@@ -14,6 +14,7 @@ if sys.platform == 'win32':
 
 from scraper.description_downloader import DescriptionDownloader
 from scraper.metadata_store import MetadataStore
+from config import settings
 from utils.logger import setup_logging
 
 setup_logging()
@@ -53,8 +54,8 @@ def main():
     parser.add_argument(
         '--workers',
         type=int,
-        default=3,
-        help='Number of parallel workers (default: 3)'
+        default=settings.MAX_DESCRIPTION_SCRAPER_WORKERS,
+        help=f'Number of parallel workers (default: {settings.MAX_DESCRIPTION_SCRAPER_WORKERS} from .env)'
     )
 
     args = parser.parse_args()
