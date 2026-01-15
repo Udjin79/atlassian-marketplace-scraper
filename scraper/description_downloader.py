@@ -103,18 +103,20 @@ def _worker_process_batch(batch):
     Must be at module level to be picklable.
     """
     if not batch:
-        return {'success': 0, 'fail': 0}
+        return {'success': 0, 'fail': 0, 'skip': 0}
 
     success = 0
     fail = 0
+    skip = 0
     total = batch[0]['total']  # Total across all batches
+    use_full_page = batch[0]['use_full_page']
 
     # Create downloader with its own browser for this process
     downloader = DescriptionDownloader()
 
     # Set up browser reuse for this process
     browser_manager = None
-    if batch[0]['use_full_page']:
+    if use_full_page:
         try:
             from scraper.page_saver_integrated import PlaywrightBrowserManager
             browser_manager = PlaywrightBrowserManager()
@@ -130,25 +132,32 @@ def _worker_process_batch(batch):
             addon_key = item['addon_key']
             idx = item['idx']
 
+            # Skip if description already exists
+            if downloader.description_exists(addon_key, use_full_page=use_full_page):
+                skip += 1
+                print(f"{idx}/{total} [SKIP] {addon_key} (already exists)", flush=True)
+                logger.debug(f"[SKIP] Description already exists: {addon_key}")
+                continue
+
             try:
                 json_path, html_path = downloader.download_description(
                     addon_key,
                     download_media=item['download_media'],
-                    marketplace_url=item['marketplace_url'] if item['use_full_page'] else None
+                    marketplace_url=item['marketplace_url'] if use_full_page else None
                 )
 
                 if json_path or html_path:
                     success += 1
-                    print(f"{idx}/{total} [OK] {addon_key}")
+                    print(f"{idx}/{total} [OK] {addon_key}", flush=True)
                     logger.info(f"[OK] Success: {addon_key}")
                 else:
                     fail += 1
-                    print(f"{idx}/{total} [FAIL] {addon_key}")
+                    print(f"{idx}/{total} [FAIL] {addon_key}", flush=True)
                     logger.warning(f"[ERROR] Failed: {addon_key}")
 
             except Exception as e:
                 fail += 1
-                print(f"{idx}/{total} [ERROR] {addon_key}")
+                print(f"{idx}/{total} [ERROR] {addon_key}", flush=True)
                 logger.error(f"[ERROR] Exception downloading {addon_key}: {e}")
 
     finally:
@@ -156,7 +165,7 @@ def _worker_process_batch(batch):
         if browser_manager:
             browser_manager.__exit__(None, None, None)
 
-    return {'success': success, 'fail': fail}
+    return {'success': success, 'fail': fail, 'skip': skip}
 
 
 class DescriptionDownloader:
@@ -187,6 +196,27 @@ class DescriptionDownloader:
 
         # Playwright page for reuse across multiple downloads (set by download_all_descriptions)
         self._playwright_page = None
+
+    def description_exists(self, addon_key: str, use_full_page: bool = True) -> bool:
+        """
+        Check if description for an app already exists.
+
+        Args:
+            addon_key: App key
+            use_full_page: Check for full page (index.html) or API description
+
+        Returns:
+            True if description exists
+        """
+        addon_dir = addon_key.replace('.', '_')
+        if use_full_page:
+            # Check for full_page/index.html
+            full_page_path = Path(self.descriptions_dir) / addon_dir / 'full_page' / 'index.html'
+            return full_page_path.exists()
+        else:
+            # Check for description.json (API mode)
+            json_path = Path(self.descriptions_dir) / addon_dir / 'description.json'
+            return json_path.exists()
 
     def _fetch(self, url: str, params: Optional[Dict] = None, log_errors: bool = True) -> Dict:
         """Fetch data from API."""
@@ -1519,11 +1549,12 @@ class DescriptionDownloader:
 
     def _download_all_sequential(self, apps, total, download_media, use_full_page):
         """Sequential download with browser reuse (for full-page mode)."""
-        print(f"[*] Starting sequential description download for {total} apps...")
+        print(f"[*] Starting sequential description download for {total} apps...", flush=True)
         logger.info(f"Starting description download for {total} apps (full_page={use_full_page})")
 
         success_count = 0
         fail_count = 0
+        skip_count = 0
 
         # Use PlaywrightBrowserManager for browser reuse if downloading full pages
         browser_manager = None
@@ -1546,8 +1577,15 @@ class DescriptionDownloader:
                 if not addon_key:
                     continue
 
+                # Skip if description already exists
+                if self.description_exists(addon_key, use_full_page=use_full_page):
+                    skip_count += 1
+                    print(f"{idx}/{total} [SKIP] {addon_key} (already exists)", flush=True)
+                    logger.debug(f"[SKIP] Description already exists: {addon_key}")
+                    continue
+
                 # Print progress to stdout for task manager progress bar
-                print(f"{idx}/{total} Downloading: {addon_key}")
+                print(f"{idx}/{total} Downloading: {addon_key}", flush=True)
                 logger.info(f"[{idx}/{total}] Downloading description for {addon_key}")
 
                 # Get marketplace_url
@@ -1562,18 +1600,18 @@ class DescriptionDownloader:
 
                     if json_path or html_path:
                         success_count += 1
-                        print(f"{idx}/{total} [OK] {addon_key}")
+                        print(f"{idx}/{total} [OK] {addon_key}", flush=True)
                         logger.info(f"[OK] Success: {addon_key}")
                     else:
                         fail_count += 1
-                        print(f"{idx}/{total} [FAIL] {addon_key}")
+                        print(f"{idx}/{total} [FAIL] {addon_key}", flush=True)
                         logger.warning(f"[ERROR] Failed: {addon_key}")
                 except KeyboardInterrupt:
                     logger.warning(f"Download interrupted by user at {addon_key}")
                     raise
                 except Exception as e:
                     fail_count += 1
-                    print(f"{idx}/{total} [ERROR] {addon_key}")
+                    print(f"{idx}/{total} [ERROR] {addon_key}", flush=True)
                     logger.error(f"[ERROR] Exception downloading {addon_key}: {e}")
 
         finally:
@@ -1581,30 +1619,40 @@ class DescriptionDownloader:
             if browser_manager:
                 browser_manager.__exit__(None, None, None)
 
-        print(f"\n[OK] Description download completed successfully! ({success_count} success, {fail_count} failed)")
-        logger.info(f"Description download complete: {success_count} success, {fail_count} failed")
+        print(f"\n[OK] Description download completed successfully! ({success_count} success, {skip_count} skipped, {fail_count} failed)", flush=True)
+        logger.info(f"Description download complete: {success_count} success, {skip_count} skipped, {fail_count} failed")
 
     def _download_all_parallel(self, apps, total, download_media, use_full_page, max_workers):
         """Parallel download for API-only mode (no Playwright)."""
         from concurrent.futures import ThreadPoolExecutor, as_completed
         from threading import Lock
 
-        print(f"[*] Starting parallel description download for {total} apps ({max_workers} workers)...")
+        print(f"[*] Starting parallel description download for {total} apps ({max_workers} workers)...", flush=True)
         logger.info(f"Starting parallel description download for {total} apps (workers={max_workers})")
 
         success_count = 0
         fail_count = 0
+        skip_count = 0
         completed_count = 0
         lock = Lock()
 
         def download_single_app(app_info):
-            nonlocal success_count, fail_count, completed_count
+            nonlocal success_count, fail_count, skip_count, completed_count
 
             idx, app = app_info
             addon_key = app.get('addon_key')
 
             if not addon_key:
                 return ('skip', None, None)
+
+            # Skip if description already exists
+            if self.description_exists(addon_key, use_full_page=False):
+                with lock:
+                    completed_count += 1
+                    skip_count += 1
+                    print(f"{completed_count}/{total} [SKIP] {addon_key} (already exists)", flush=True)
+                logger.debug(f"[SKIP] Description already exists: {addon_key}")
+                return ('skip', addon_key, None)
 
             marketplace_url = self._get_marketplace_url(app)
 
@@ -1619,12 +1667,12 @@ class DescriptionDownloader:
                     completed_count += 1
                     if json_path or html_path:
                         success_count += 1
-                        print(f"{completed_count}/{total} [OK] {addon_key}")
+                        print(f"{completed_count}/{total} [OK] {addon_key}", flush=True)
                         logger.info(f"[OK] Success: {addon_key}")
                         return ('success', addon_key, html_path)
                     else:
                         fail_count += 1
-                        print(f"{completed_count}/{total} [FAIL] {addon_key}")
+                        print(f"{completed_count}/{total} [FAIL] {addon_key}", flush=True)
                         logger.warning(f"[ERROR] Failed: {addon_key}")
                         return ('fail', addon_key, None)
 
@@ -1632,7 +1680,7 @@ class DescriptionDownloader:
                 with lock:
                     completed_count += 1
                     fail_count += 1
-                    print(f"{completed_count}/{total} [ERROR] {addon_key}")
+                    print(f"{completed_count}/{total} [ERROR] {addon_key}", flush=True)
                 logger.error(f"[ERROR] Exception downloading {addon_key}: {e}")
                 return ('error', addon_key, str(e))
 
@@ -1646,8 +1694,8 @@ class DescriptionDownloader:
                 except Exception as e:
                     logger.error(f"Worker exception: {e}")
 
-        print(f"\n[OK] Description download completed successfully! ({success_count} success, {fail_count} failed)")
-        logger.info(f"Description download complete: {success_count} success, {fail_count} failed")
+        print(f"\n[OK] Description download completed successfully! ({success_count} success, {skip_count} skipped, {fail_count} failed)", flush=True)
+        logger.info(f"Description download complete: {success_count} success, {skip_count} skipped, {fail_count} failed")
 
     def _get_marketplace_url(self, app):
         """Extract marketplace URL from app dict."""
@@ -1667,10 +1715,11 @@ class DescriptionDownloader:
 
     def _download_all_multiprocess(self, apps, total, download_media, use_full_page, max_workers):
         """Parallel download using multiprocessing (each process gets its own browser)."""
+        import signal
         from multiprocessing import Pool, Manager
 
-        print(f"[*] Starting multiprocess description download for {total} apps ({max_workers} workers)...")
-        print(f"[*] Each worker process will have its own browser instance")
+        print(f"[*] Starting multiprocess description download for {total} apps ({max_workers} workers)...", flush=True)
+        print(f"[*] Each worker process will have its own browser instance", flush=True)
         logger.info(f"Starting multiprocess description download for {total} apps (workers={max_workers})")
 
         # Prepare work items with all needed data
@@ -1690,10 +1739,25 @@ class DescriptionDownloader:
                 'descriptions_dir': self.descriptions_dir
             })
 
-        # Use Manager for shared counters
-        with Manager() as manager:
-            counters = manager.dict({'success': 0, 'fail': 0, 'completed': 0})
-            lock = manager.Lock()
+        # Track pool for signal handling
+        pool = None
+        original_sigterm = signal.getsignal(signal.SIGTERM)
+        original_sigint = signal.getsignal(signal.SIGINT)
+
+        def signal_handler(signum, frame):
+            """Handle termination signals by cleaning up the pool."""
+            logger.warning(f"Received signal {signum}, terminating worker processes...")
+            print(f"\n[!] Received termination signal, stopping workers...", flush=True)
+            if pool is not None:
+                pool.terminate()
+                pool.join()
+            # Re-raise to allow proper cleanup
+            raise KeyboardInterrupt("Task cancelled")
+
+        try:
+            # Set up signal handlers
+            signal.signal(signal.SIGTERM, signal_handler)
+            signal.signal(signal.SIGINT, signal_handler)
 
             # Process in batches - each worker processes multiple items with browser reuse
             batch_size = max(1, len(work_items) // max_workers)
@@ -1706,15 +1770,34 @@ class DescriptionDownloader:
                 for i, item in enumerate(work_items):
                     batches[i % max_workers].append(item)
 
-            with Pool(processes=max_workers) as pool:
+            pool = Pool(processes=max_workers)
+            try:
                 results = pool.map(_worker_process_batch, batches)
+            finally:
+                pool.close()
+                pool.join()
+                pool = None
 
             # Aggregate results
             success_count = sum(r['success'] for r in results)
             fail_count = sum(r['fail'] for r in results)
+            skip_count = sum(r.get('skip', 0) for r in results)
 
-        print(f"\n[OK] Description download completed successfully! ({success_count} success, {fail_count} failed)")
-        logger.info(f"Description download complete: {success_count} success, {fail_count} failed")
+            print(f"\n[OK] Description download completed successfully! ({success_count} success, {skip_count} skipped, {fail_count} failed)", flush=True)
+            logger.info(f"Description download complete: {success_count} success, {skip_count} skipped, {fail_count} failed")
+
+        except KeyboardInterrupt:
+            print(f"\n[!] Download cancelled by user", flush=True)
+            logger.warning("Download cancelled by user")
+            raise
+        finally:
+            # Restore original signal handlers
+            signal.signal(signal.SIGTERM, original_sigterm)
+            signal.signal(signal.SIGINT, original_sigint)
+            # Ensure pool is terminated
+            if pool is not None:
+                pool.terminate()
+                pool.join()
 
     def save_marketplace_page_with_playwright(
         self,
