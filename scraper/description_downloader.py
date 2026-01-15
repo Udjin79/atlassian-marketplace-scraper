@@ -139,7 +139,7 @@ def _worker_process_batch(batch):
             # Skip if description already exists
             if downloader.description_exists(addon_key, use_full_page=use_full_page):
                 skip += 1
-                print(f"{idx}/{total} [SKIP] {addon_key} (already exists)", flush=True)
+                print(f"{idx}/{total} ({skip} skipped, {success} OK) {addon_key}", flush=True)
                 logger.debug(f"[SKIP] Description already exists: {addon_key}")
                 continue
 
@@ -152,16 +152,16 @@ def _worker_process_batch(batch):
 
                 if json_path or html_path:
                     success += 1
-                    print(f"{idx}/{total} [OK] {addon_key}", flush=True)
+                    print(f"{idx}/{total} ({skip} skipped, {success} OK) {addon_key}", flush=True)
                     logger.info(f"[OK] Success: {addon_key}")
                 else:
                     fail += 1
-                    print(f"{idx}/{total} [FAIL] {addon_key}", flush=True)
+                    print(f"{idx}/{total} ({skip} skipped, {success} OK, {fail} failed) {addon_key}", flush=True)
                     logger.warning(f"[ERROR] Failed: {addon_key}")
 
             except Exception as e:
                 fail += 1
-                print(f"{idx}/{total} [ERROR] {addon_key}", flush=True)
+                print(f"{idx}/{total} ({skip} skipped, {success} OK, {fail} failed) {addon_key}", flush=True)
                 logger.error(f"[ERROR] Exception downloading {addon_key}: {e}")
 
     finally:
@@ -1584,13 +1584,9 @@ class DescriptionDownloader:
                 # Skip if description already exists
                 if self.description_exists(addon_key, use_full_page=use_full_page):
                     skip_count += 1
-                    print(f"{idx}/{total} [SKIP] {addon_key} (already exists)", flush=True)
+                    print(f"{idx}/{total} ({skip_count} skipped, {success_count} OK) {addon_key}", flush=True)
                     logger.debug(f"[SKIP] Description already exists: {addon_key}")
                     continue
-
-                # Print progress to stdout for task manager progress bar
-                print(f"{idx}/{total} Downloading: {addon_key}", flush=True)
-                logger.info(f"[{idx}/{total}] Downloading description for {addon_key}")
 
                 # Get marketplace_url
                 marketplace_url = self._get_marketplace_url(app)
@@ -1604,18 +1600,18 @@ class DescriptionDownloader:
 
                     if json_path or html_path:
                         success_count += 1
-                        print(f"{idx}/{total} [OK] {addon_key}", flush=True)
+                        print(f"{idx}/{total} ({skip_count} skipped, {success_count} OK) {addon_key}", flush=True)
                         logger.info(f"[OK] Success: {addon_key}")
                     else:
                         fail_count += 1
-                        print(f"{idx}/{total} [FAIL] {addon_key}", flush=True)
+                        print(f"{idx}/{total} ({skip_count} skipped, {success_count} OK, {fail_count} failed) {addon_key}", flush=True)
                         logger.warning(f"[ERROR] Failed: {addon_key}")
                 except KeyboardInterrupt:
                     logger.warning(f"Download interrupted by user at {addon_key}")
                     raise
                 except Exception as e:
                     fail_count += 1
-                    print(f"{idx}/{total} [ERROR] {addon_key}", flush=True)
+                    print(f"{idx}/{total} ({skip_count} skipped, {success_count} OK, {fail_count} failed) {addon_key}", flush=True)
                     logger.error(f"[ERROR] Exception downloading {addon_key}: {e}")
 
         finally:
@@ -1654,7 +1650,7 @@ class DescriptionDownloader:
                 with lock:
                     completed_count += 1
                     skip_count += 1
-                    print(f"{completed_count}/{total} [SKIP] {addon_key} (already exists)", flush=True)
+                    print(f"{completed_count}/{total} ({skip_count} skipped, {success_count} OK) {addon_key}", flush=True)
                 logger.debug(f"[SKIP] Description already exists: {addon_key}")
                 return ('skip', addon_key, None)
 
@@ -1671,12 +1667,12 @@ class DescriptionDownloader:
                     completed_count += 1
                     if json_path or html_path:
                         success_count += 1
-                        print(f"{completed_count}/{total} [OK] {addon_key}", flush=True)
+                        print(f"{completed_count}/{total} ({skip_count} skipped, {success_count} OK) {addon_key}", flush=True)
                         logger.info(f"[OK] Success: {addon_key}")
                         return ('success', addon_key, html_path)
                     else:
                         fail_count += 1
-                        print(f"{completed_count}/{total} [FAIL] {addon_key}", flush=True)
+                        print(f"{completed_count}/{total} ({skip_count} skipped, {success_count} OK, {fail_count} failed) {addon_key}", flush=True)
                         logger.warning(f"[ERROR] Failed: {addon_key}")
                         return ('fail', addon_key, None)
 
@@ -1684,7 +1680,7 @@ class DescriptionDownloader:
                 with lock:
                     completed_count += 1
                     fail_count += 1
-                    print(f"{completed_count}/{total} [ERROR] {addon_key}", flush=True)
+                    print(f"{completed_count}/{total} ({skip_count} skipped, {success_count} OK, {fail_count} failed) {addon_key}", flush=True)
                 logger.error(f"[ERROR] Exception downloading {addon_key}: {e}")
                 return ('error', addon_key, str(e))
 
