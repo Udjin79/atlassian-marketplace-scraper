@@ -102,6 +102,10 @@ def _worker_process_batch(batch):
     Each worker process creates its own browser and reuses it for all items in the batch.
     Must be at module level to be picklable.
     """
+    import sys
+    # Ensure unbuffered output in worker process
+    sys.stdout.reconfigure(line_buffering=True) if hasattr(sys.stdout, 'reconfigure') else None
+
     if not batch:
         return {'success': 0, 'fail': 0, 'skip': 0}
 

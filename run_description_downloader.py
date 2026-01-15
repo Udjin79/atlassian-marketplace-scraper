@@ -1,11 +1,15 @@
 #!/usr/bin/env python
 """Download plugin descriptions with images and videos from Atlassian Marketplace."""
 
+import os
 import sys
 import io
 import argparse
 import time
 from datetime import datetime
+
+# Ensure unbuffered output for real-time progress tracking (critical for multiprocessing)
+os.environ['PYTHONUNBUFFERED'] = '1'
 
 # Fix encoding for Windows console
 if sys.platform == 'win32':

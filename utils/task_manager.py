@@ -149,6 +149,9 @@ class TaskManager:
                 
                 # Prepare environment
                 env = os.environ.copy()
+                # Ensure unbuffered output for real-time progress tracking
+                # This is critical for multiprocessing workers to flush output immediately
+                env['PYTHONUNBUFFERED'] = '1'
                 # Ensure Python path includes the project directory
                 pythonpath = env.get('PYTHONPATH', '')
                 if pythonpath:
