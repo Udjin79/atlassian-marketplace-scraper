@@ -21,7 +21,7 @@ from utils.logger import get_logger
 
 logger = get_logger('description_downloader')
 
-__all__ = ["save_webpage_full", "SaveResult"]
+__all__ = ["save_webpage_full", "SaveResult", "PlaywrightBrowserManager"]
 
 
 @dataclass
@@ -139,7 +139,7 @@ def _rewrite_css_urls(css_text: str, repl_map: Dict[str, str]) -> str:
 # ------------------------------ core -------------------------------------
 
 class _Saver:
-    def __init__(self, url: str, out_html: Path, assets_dir: Optional[Path], offline: bool, timeout: int, session: Optional[requests.Session] = None):
+    def __init__(self, url: str, out_html: Path, assets_dir: Optional[Path], offline: bool, timeout: int, session: Optional[requests.Session] = None, playwright_page=None):
         self.url = url
         self.out_html = out_html
         self.assets_dir = assets_dir
@@ -149,6 +149,7 @@ class _Saver:
         self.session.headers.update({"User-Agent": _user_agent()})
         self._downloaded: Dict[str, str] = {}  # abs_url -> rel_path/from html
         self._playwright_resources: List[str] = []  # Resources found via Playwright
+        self._playwright_page = playwright_page  # Reusable Playwright page (optional)
 
     def _abs_url(self, base: str, maybe: str) -> str:
         if not maybe:
@@ -1026,12 +1027,48 @@ class _Saver:
             logger.debug(f"Failed to write CSS file {local_path}: {e}")
 
     def _get_html_with_playwright(self, url: str, wait_seconds: int = 8, timeout: int = 90) -> Tuple[str, str]:
-        """Gets page HTML after JavaScript execution via Playwright."""
+        """Gets page HTML after JavaScript execution via Playwright.
+
+        If self._playwright_page is set, reuses that page instead of creating a new browser.
+        This is much faster when processing many pages.
+        """
         try:
             from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
-            
+
+            # If we have a reusable page, use it
+            if self._playwright_page is not None:
+                logger.info("Using existing Playwright page (reused browser)...")
+                page = self._playwright_page
+
+                try:
+                    page.goto(url, wait_until="load", timeout=timeout * 1000)
+                    logger.debug("Page loaded successfully")
+                except Exception as e:
+                    logger.warning(f"Load timeout, trying domcontentloaded: {str(e)[:100]}")
+                    try:
+                        page.goto(url, wait_until="domcontentloaded", timeout=timeout * 1000)
+                    except Exception:
+                        page.goto(url, timeout=30000)
+
+                # Wait for content to load
+                page.wait_for_timeout(wait_seconds * 1000)
+                page.wait_for_timeout(3000)
+
+                # Try to wait for main content to load
+                try:
+                    page.wait_for_selector('body', timeout=5000)
+                    page.wait_for_timeout(5000)
+                except PlaywrightTimeout:
+                    pass
+
+                html = page.content()
+                final_url = page.url
+                logger.info(f"Page loaded via Playwright (reused) ({len(html)} characters)")
+                return html, final_url
+
+            # Fallback: create new browser (original behavior)
             logger.info("Using Playwright to get fully loaded page...")
-            
+
             with sync_playwright() as p:
                 browser = p.chromium.launch(
                     headless=True,
@@ -1046,7 +1083,7 @@ class _Saver:
                     user_agent=_user_agent(),
                     viewport={'width': 1920, 'height': 1080}
                 )
-                
+
                 # Block unnecessary resources
                 def route_handler(route):
                     url_req = route.request.url
@@ -1059,11 +1096,11 @@ class _Saver:
                         route.abort()
                     else:
                         route.continue_()
-                
+
                 context.route("**/*", route_handler)
-                
+
                 page = context.new_page()
-                
+
                 try:
                     page.goto(url, wait_until="load", timeout=timeout * 1000)
                     logger.debug("Page loaded successfully")
@@ -1073,11 +1110,11 @@ class _Saver:
                         page.goto(url, wait_until="domcontentloaded", timeout=timeout * 1000)
                     except Exception:
                         page.goto(url, timeout=30000)
-                
+
                 # Wait for content to load
                 page.wait_for_timeout(wait_seconds * 1000)
                 page.wait_for_timeout(3000)
-                
+
                 # Try to wait for main content to load
                 try:
                     # Wait for body element
@@ -1093,7 +1130,7 @@ class _Saver:
                 browser.close()
                 logger.info(f"Page loaded via Playwright ({len(html)} characters)")
                 return html, final_url
-                
+
         except ImportError:
             logger.warning("Playwright not installed")
             raise
@@ -1215,6 +1252,104 @@ class _Saver:
 
 # ------------------------------ public API -----------------------------
 
+
+class PlaywrightBrowserManager:
+    """
+    Manager for reusing a single Playwright browser across multiple page saves.
+
+    Usage:
+        with PlaywrightBrowserManager() as manager:
+            for url in urls:
+                save_webpage_full(url, output, playwright_page=manager.page)
+
+    This is MUCH faster than creating a new browser for each page.
+    """
+
+    def __init__(self):
+        self._playwright = None
+        self._browser = None
+        self._context = None
+        self._page = None
+
+    def __enter__(self):
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            logger.warning("Playwright not installed, browser reuse not available")
+            return self
+
+        try:
+            logger.info("Starting reusable Playwright browser...")
+            self._playwright = sync_playwright().start()
+            self._browser = self._playwright.chromium.launch(
+                headless=True,
+                args=[
+                    '--disable-blink-features=AutomationControlled',
+                    '--disable-dev-shm-usage',
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox'
+                ]
+            )
+            self._context = self._browser.new_context(
+                user_agent=_user_agent(),
+                viewport={'width': 1920, 'height': 1080}
+            )
+
+            # Block unnecessary resources at context level
+            def route_handler(route):
+                url_req = route.request.url
+                blocked_patterns = [
+                    'analytics', 'tracking', 'doubleclick', 'googlesyndication',
+                    'facebook.com/tr', 'optimizely.com', 'hotjar.com',
+                    'googletagmanager.com', 'google-analytics.com'
+                ]
+                if any(pattern in url_req.lower() for pattern in blocked_patterns):
+                    route.abort()
+                else:
+                    route.continue_()
+
+            self._context.route("**/*", route_handler)
+            self._page = self._context.new_page()
+            logger.info("Playwright browser started and ready for reuse")
+        except Exception as e:
+            logger.warning(f"Failed to start reusable browser: {e}")
+            logger.warning("Will fall back to creating new browser for each page")
+            # Clean up partial state
+            if self._browser:
+                try:
+                    self._browser.close()
+                except Exception:
+                    pass
+            if self._playwright:
+                try:
+                    self._playwright.stop()
+                except Exception:
+                    pass
+            self._playwright = None
+            self._browser = None
+            self._context = None
+            self._page = None
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self._browser:
+            logger.info("Closing reusable Playwright browser...")
+            self._browser.close()
+        if self._playwright:
+            self._playwright.stop()
+        return False
+
+    @property
+    def page(self):
+        """Returns the reusable page, or None if browser not available."""
+        return self._page
+
+    @property
+    def is_available(self) -> bool:
+        """Check if the browser is available and ready."""
+        return self._page is not None
+
+
 def save_webpage_full(
     url: str,
     output: str,
@@ -1224,6 +1359,7 @@ def save_webpage_full(
     timeout: int = 90,
     wait_seconds: int = 10,
     session: Optional[requests.Session] = None,
+    playwright_page=None,
 ) -> SaveResult:
     """
     Save page to local HTML (full version).
@@ -1236,12 +1372,13 @@ def save_webpage_full(
         timeout: HTTP request timeout in seconds
         wait_seconds: wait time after page load for JS
         session: optional requests session
+        playwright_page: optional reusable Playwright page (for batch processing)
 
     Returns:
         SaveResult with paths to saved files
     """
     out_html = Path(output).resolve()
     assets = Path(assets_dir).resolve() if assets_dir else (out_html.parent / "assets")
-    saver = _Saver(url=url, out_html=out_html, assets_dir=assets, offline=offline, timeout=timeout, session=session)
+    saver = _Saver(url=url, out_html=out_html, assets_dir=assets, offline=offline, timeout=timeout, session=session, playwright_page=playwright_page)
     return saver.run(wait_seconds=wait_seconds, timeout=timeout)
 

@@ -122,6 +122,9 @@ class DescriptionDownloader:
         os.makedirs(self.descriptions_dir, exist_ok=True)
         logger.debug(f"Descriptions directory: {self.descriptions_dir}")
 
+        # Playwright page for reuse across multiple downloads (set by download_all_descriptions)
+        self._playwright_page = None
+
     def _fetch(self, url: str, params: Optional[Dict] = None, log_errors: bool = True) -> Dict:
         """Fetch data from API."""
         try:
@@ -587,7 +590,8 @@ class DescriptionDownloader:
                     assets_dir=str(assets_dir),
                     timeout=120,
                     wait_seconds=10,
-                    session=self.session
+                    session=self.session,
+                    playwright_page=self._playwright_page  # Reuse browser if available
                 )
                 
                 if result and Path(result.output_html).exists():
@@ -1442,47 +1446,80 @@ class DescriptionDownloader:
         success_count = 0
         fail_count = 0
 
-        for idx, app in enumerate(apps, 1):
-            addon_key = app.get('addon_key')
-            marketplace_url_raw = app.get('marketplace_url')
-            
-            if not addon_key:
-                continue
+        # Use PlaywrightBrowserManager for browser reuse if downloading full pages
+        # This is MUCH faster than creating a new browser for each page
+        browser_manager = None
+        if use_full_page:
+            try:
+                from scraper.page_saver_integrated import PlaywrightBrowserManager
+                browser_manager = PlaywrightBrowserManager()
+            except ImportError:
+                logger.warning("PlaywrightBrowserManager not available, will create new browser for each page")
 
-            logger.info(f"[{idx}/{total}] Downloading description for {addon_key}")
+        try:
+            # Start the browser if available
+            if browser_manager:
+                browser_manager.__enter__()
+                self._playwright_page = browser_manager.page
+                if self._playwright_page:
+                    logger.info("Browser reuse enabled - this will be MUCH faster")
+                else:
+                    logger.warning("Browser reuse not available, falling back to new browser per page")
 
-            # Handle marketplace_url - can be string or dict
-            marketplace_url = None
-            if marketplace_url_raw:
-                if isinstance(marketplace_url_raw, dict):
-                    marketplace_url = marketplace_url_raw.get('href', '')
-                elif isinstance(marketplace_url_raw, str):
-                    marketplace_url = marketplace_url_raw.strip()
-            
-            # If marketplace_url is empty, construct it
-            if not marketplace_url:
-                logger.debug(f"marketplace_url is empty for {addon_key}, will construct URL")
-                marketplace_url = f"https://marketplace.atlassian.com/apps/{addon_key}?hosting=datacenter&tab=overview"
+            for idx, app in enumerate(apps, 1):
+                addon_key = app.get('addon_key')
+                marketplace_url_raw = app.get('marketplace_url')
 
-            # Always use download_description - it handles both full_page and API
-            # If use_full_page=True, it will download full_page + API
-            # If use_full_page=False, it will only download API
-            json_path, html_path = self.download_description(
-                addon_key,
-                download_media=download_media,
-                marketplace_url=marketplace_url if use_full_page else None
-            )
+                if not addon_key:
+                    continue
 
-            if json_path or html_path:
-                success_count += 1
-                logger.info(f"[OK] Success: {addon_key}")
-                if json_path:
-                    logger.debug(f"  JSON: {json_path}")
-                if html_path:
-                    logger.debug(f"  HTML: {html_path}")
-            else:
-                fail_count += 1
-                logger.warning(f"[ERROR] Failed: {addon_key}")
+                logger.info(f"[{idx}/{total}] Downloading description for {addon_key}")
+
+                # Handle marketplace_url - can be string or dict
+                marketplace_url = None
+                if marketplace_url_raw:
+                    if isinstance(marketplace_url_raw, dict):
+                        marketplace_url = marketplace_url_raw.get('href', '')
+                    elif isinstance(marketplace_url_raw, str):
+                        marketplace_url = marketplace_url_raw.strip()
+
+                # If marketplace_url is empty, construct it
+                if not marketplace_url:
+                    logger.debug(f"marketplace_url is empty for {addon_key}, will construct URL")
+                    marketplace_url = f"https://marketplace.atlassian.com/apps/{addon_key}?hosting=datacenter&tab=overview"
+
+                # Always use download_description - it handles both full_page and API
+                # If use_full_page=True, it will download full_page + API
+                # If use_full_page=False, it will only download API
+                try:
+                    json_path, html_path = self.download_description(
+                        addon_key,
+                        download_media=download_media,
+                        marketplace_url=marketplace_url if use_full_page else None
+                    )
+
+                    if json_path or html_path:
+                        success_count += 1
+                        logger.info(f"[OK] Success: {addon_key}")
+                        if json_path:
+                            logger.debug(f"  JSON: {json_path}")
+                        if html_path:
+                            logger.debug(f"  HTML: {html_path}")
+                    else:
+                        fail_count += 1
+                        logger.warning(f"[ERROR] Failed: {addon_key}")
+                except KeyboardInterrupt:
+                    logger.warning(f"Download interrupted by user at {addon_key}")
+                    raise
+                except Exception as e:
+                    fail_count += 1
+                    logger.error(f"[ERROR] Exception downloading {addon_key}: {e}")
+
+        finally:
+            # Clean up browser
+            self._playwright_page = None
+            if browser_manager:
+                browser_manager.__exit__(None, None, None)
 
         logger.info(f"Description download complete: {success_count} success, {fail_count} failed")
 
