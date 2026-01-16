@@ -485,7 +485,7 @@ def register_routes(app):
                 ))
                 real_path = os.path.realpath(description_path)
 
-                if not real_path.startswith(base_dir):
+                if not (real_path.startswith(base_dir + os.sep) or real_path == base_dir):
                     logger.warning(f"Path traversal attempt detected: {_sanitize_for_log(filename)} -> {_sanitize_for_log(real_path)}")
                     return render_template('error.html', error="Access denied"), 403
             else:
@@ -509,10 +509,10 @@ def register_routes(app):
                 ))
                 real_path = os.path.realpath(description_path)
 
-                if not real_path.startswith(base_dir):
+                if not (real_path.startswith(base_dir + os.sep) or real_path == base_dir):
                     logger.warning(f"Path traversal attempt detected: {_sanitize_for_log(filename)} -> {_sanitize_for_log(real_path)}")
                     return render_template('error.html', error="Access denied"), 403
-                
+
                 # Also check full_page directory
                 if not os.path.exists(description_path):
                     full_page_path = os.path.join(

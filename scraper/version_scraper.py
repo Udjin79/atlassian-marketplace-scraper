@@ -108,7 +108,8 @@ class VersionScraper:
 
         print(f"\n[OK] Version scraping complete!")
         print(f"   Total versions collected: {total_versions}")
-        print(f"   Average per app: {total_versions / len(apps):.1f}")
+        if len(apps) > 0:
+            print(f"   Average per app: {total_versions / len(apps):.1f}")
 
         if failed_apps:
             print(f"   [WARNING] Failed apps: {len(failed_apps)}")

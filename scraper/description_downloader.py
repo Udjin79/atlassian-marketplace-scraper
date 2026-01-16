@@ -6,7 +6,7 @@ import re
 import hashlib
 import mimetypes
 from pathlib import Path
-from typing import Dict, Optional, Tuple, List, Union, Union
+from typing import Dict, Optional, Tuple, List, Union
 from datetime import datetime, timezone
 from html import escape
 from urllib.parse import urljoin, urlparse
@@ -1811,7 +1811,18 @@ class DescriptionDownloader:
 
                 pool = Pool(processes=max_workers)
                 try:
-                    results = pool.map(_worker_process_batch, batch_args)
+                    # Use imap_unordered to get results as they complete
+                    # and print progress from main process (captured by task manager)
+                    results = []
+                    for result in pool.imap_unordered(_worker_process_batch, batch_args):
+                        results.append(result)
+                        # Print progress from main process (captured by task manager)
+                        with shared_counters['lock']:
+                            completed = shared_counters['completed'].value
+                            success = shared_counters['success'].value
+                            skip = shared_counters['skip'].value
+                            fail = shared_counters['fail'].value
+                        print(f"{completed}/{total} ({skip} skipped, {success} OK, {fail} failed)", flush=True)
                 finally:
                     pool.close()
                     pool.join()
