@@ -201,7 +201,7 @@ class TaskManager:
                                           any(keyword in line_stripped.lower() for keyword in
                                               ['scraping', 'scrape', 'downloading', 'download',
                                                'processing', 'process', 'saving', 'save',
-                                               'fetching', 'fetch', 'completed', 'starting'])):
+                                               'fetching', 'fetch', 'completed', 'starting', 'skipped'])):
                         update_counter = 0
 
                         # Extract meaningful current action
