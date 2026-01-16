@@ -330,6 +330,9 @@ class _Saver:
             b.decompose()
 
         if self.offline:
+            # In offline mode, we don't inject a <base> tag since all URLs are
+            # rewritten to local relative paths. Adding a <base> tag would break
+            # these local references by making them resolve against the original URL.
             pass
         else:
             base = soup.new_tag("base", href=base_url)
@@ -1318,13 +1321,13 @@ class PlaywrightBrowserManager:
             if self._browser:
                 try:
                     self._browser.close()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Error closing browser during cleanup: {e}")
             if self._playwright:
                 try:
                     self._playwright.stop()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Error stopping playwright during cleanup: {e}")
             self._playwright = None
             self._browser = None
             self._context = None

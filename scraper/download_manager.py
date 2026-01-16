@@ -216,7 +216,7 @@ class DownloadManager:
                 try:
                     status.mark_started()
 
-                    response = requests.get(download_url, stream=True, timeout=60)
+                    response = self.api.session.get(download_url, stream=True, timeout=60)
                     response.raise_for_status()
 
                     total_size = int(response.headers.get('content-length', 0))

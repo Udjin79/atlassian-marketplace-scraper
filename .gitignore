@@ -22,12 +22,21 @@ env/
 .vscode/
 .idea/
 .claude/
+.specify/
+specs/
 
 # Logs
 *.log
 
 # Temporary files
 *.tmp
+.tmp/
+
+# Orchestration reports
+data/analysis/
+bug-hunting-report.md
+bug-fixes-implemented.md
+*-report.md
 
 # OS
 .DS_Store
@@ -37,3 +46,5 @@ Thumbs.db
 data/binaries/
 data/metadata/
 *.db
+/CLAUDE.md
+/Makefile

@@ -1,6 +1,6 @@
 """Checkpoint management for resume capability."""
 
-import pickle
+import json
 import os
 from config import settings
 
@@ -18,8 +18,8 @@ def save_checkpoint(state, checkpoint_file=None):
 
     os.makedirs(os.path.dirname(checkpoint_file), exist_ok=True)
 
-    with open(checkpoint_file, 'wb') as f:
-        pickle.dump(state, f)
+    with open(checkpoint_file, 'w', encoding='utf-8') as f:
+        json.dump(state, f, indent=2, default=str)
 
 
 def load_checkpoint(checkpoint_file=None):
@@ -36,8 +36,8 @@ def load_checkpoint(checkpoint_file=None):
         checkpoint_file = settings.CHECKPOINT_FILE
 
     if os.path.exists(checkpoint_file):
-        with open(checkpoint_file, 'rb') as f:
-            return pickle.load(f)  # nosec B301 - locally generated files only
+        with open(checkpoint_file, 'r', encoding='utf-8') as f:
+            return json.load(f)
 
     return None
 

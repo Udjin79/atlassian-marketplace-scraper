@@ -155,7 +155,7 @@ class TaskManager:
                 # Ensure Python path includes the project directory
                 pythonpath = env.get('PYTHONPATH', '')
                 if pythonpath:
-                    env['PYTHONPATH'] = f"{base_dir};{pythonpath}" if os.name == 'nt' else f"{base_dir}:{pythonpath}"
+                    env['PYTHONPATH'] = f"{base_dir}{os.pathsep}{pythonpath}"
                 else:
                     env['PYTHONPATH'] = base_dir
                 
@@ -780,11 +780,15 @@ class TaskManager:
 
 # Global task manager instance
 _task_manager = None
+_task_manager_lock = threading.Lock()
 
 def get_task_manager() -> TaskManager:
-    """Get global task manager instance."""
+    """Get global task manager instance (thread-safe singleton)."""
     global _task_manager
     if _task_manager is None:
-        _task_manager = TaskManager()
+        with _task_manager_lock:
+            # Double-check locking pattern
+            if _task_manager is None:
+                _task_manager = TaskManager()
     return _task_manager
 
