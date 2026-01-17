@@ -1,0 +1,44 @@
+# Docker Compose Override Example - Multi-Drive Storage Configuration
+#
+# Copy this file to docker-compose.override.yml and customize the paths
+# for your setup. The override file is automatically merged with docker-compose.yml.
+#
+# Usage:
+#   cp docker-compose.override.example.yml docker-compose.override.yml
+#   # Edit paths below to match your storage drives
+#   docker compose up -d
+
+x-storage-volumes: &storage-volumes
+  # Mount .env file for settings modification via web UI
+  - ./.env:/app/.env
+
+  # Metadata on fast storage (SSD recommended)
+  - /mnt/sdcard/marketplace/metadata:/app/data/metadata
+  - /mnt/sdcard/marketplace/logs:/app/logs
+
+  # Per-product binaries on different drives
+  # Customize these paths based on your storage configuration
+  - /mnt/storage1/marketplace/binaries/jira:/app/data/binaries/jira
+  - /mnt/storage2/marketplace/binaries/confluence:/app/data/binaries/confluence
+  - /mnt/storage2/marketplace/binaries/bitbucket:/app/data/binaries/bitbucket
+  - /mnt/storage2/marketplace/binaries/bamboo:/app/data/binaries/bamboo
+  - /mnt/storage2/marketplace/binaries/crowd:/app/data/binaries/crowd
+
+services:
+  web:
+    volumes: *storage-volumes
+
+  scraper:
+    volumes: *storage-volumes
+
+  version-scraper:
+    volumes: *storage-volumes
+
+  downloader:
+    volumes: *storage-volumes
+
+  description-downloader:
+    volumes: *storage-volumes
+
+  search-indexer:
+    volumes: *storage-volumes
