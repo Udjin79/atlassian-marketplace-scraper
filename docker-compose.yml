@@ -15,6 +15,10 @@
 
 # Common volume configuration (DRY - reused across all services)
 x-common-volumes: &common-volumes
+  # Environment file (required for settings modification via web UI)
+  # This allows the web app to read and modify .env settings directly
+  - "./.env:/app/.env"
+
   # Metadata (SQLite database, checkpoints, descriptions)
   # Default: ./data/metadata → Maps to /app/data/metadata in container
   - "${METADATA_PATH:-./data/metadata}:/app/data/metadata"
@@ -123,6 +127,9 @@ networks:
 # For advanced setups, create a docker-compose.override.yml file to customize
 # volume mounts per service without modifying this file.
 #
+# IMPORTANT: The .env file is mounted at /app/.env to allow settings
+# modification from the web UI. Make sure .env exists before starting.
+#
 # Example 1: Everything on external drive
 # ----------------------------------------
 # Add to .env:
@@ -139,26 +146,47 @@ networks:
 #
 # Example 3: Per-product binaries on separate drives (Maximum I/O)
 # -----------------------------------------------------------------
-# For this advanced setup, create docker-compose.override.yml:
+# CRITICAL: When using per-product paths (BINARIES_DIR_JIRA, etc.),
+# you MUST mount each host path to the container. The environment
+# variables alone are NOT sufficient - the container needs access
+# to the actual directories via volume mounts.
+#
+# Create docker-compose.override.yml with this content:
 #
 # services:
-#   downloader:
+#   web:
 #     volumes:
+#       - ./.env:/app/.env
 #       - ${METADATA_PATH:-./data/metadata}:/app/data/metadata
 #       - ${LOGS_PATH:-./logs}:/app/logs
-#       # Mount each product to separate drive
-#       - /mnt/disk1/jira:/app/data/binaries/jira
-#       - /mnt/disk2/confluence:/app/data/binaries/confluence
-#       - /mnt/disk3/bitbucket:/app/data/binaries/bitbucket
-#       - /mnt/disk4/bamboo:/app/data/binaries/bamboo
-#       - /mnt/disk5/crowd:/app/data/binaries/crowd
-#     environment:
-#       # Tell the Python app where to find binaries inside container
-#       - BINARIES_DIR_JIRA=/app/data/binaries/jira
-#       - BINARIES_DIR_CONFLUENCE=/app/data/binaries/confluence
-#       - BINARIES_DIR_BITBUCKET=/app/data/binaries/bitbucket
-#       - BINARIES_DIR_BAMBOO=/app/data/binaries/bamboo
-#       - BINARIES_DIR_CROWD=/app/data/binaries/crowd
+#       # Mount each product to its container path
+#       - /mnt/storage1/MarketplaceParser/data/binaries/jira-binaries:/app/data/binaries/jira
+#       - /mnt/storage2/marketplace/confluence-binaries:/app/data/binaries/confluence
+#       - /mnt/storage2/marketplace/bitbucket-binaries:/app/data/binaries/bitbucket
+#       - /mnt/storage2/marketplace/bamboo-binaries:/app/data/binaries/bamboo
+#       - /mnt/storage2/marketplace/crowd-binaries:/app/data/binaries/crowd
+#
+#   downloader:
+#     volumes:
+#       - ./.env:/app/.env
+#       - ${METADATA_PATH:-./data/metadata}:/app/data/metadata
+#       - ${LOGS_PATH:-./logs}:/app/logs
+#       # Same mounts as web service
+#       - /mnt/storage1/MarketplaceParser/data/binaries/jira-binaries:/app/data/binaries/jira
+#       - /mnt/storage2/marketplace/confluence-binaries:/app/data/binaries/confluence
+#       - /mnt/storage2/marketplace/bitbucket-binaries:/app/data/binaries/bitbucket
+#       - /mnt/storage2/marketplace/bamboo-binaries:/app/data/binaries/bamboo
+#       - /mnt/storage2/marketplace/crowd-binaries:/app/data/binaries/crowd
+#
+# Then in your .env file, set the CONTAINER paths (not host paths!):
+#   BINARIES_DIR_JIRA=/app/data/binaries/jira
+#   BINARIES_DIR_CONFLUENCE=/app/data/binaries/confluence
+#   BINARIES_DIR_BITBUCKET=/app/data/binaries/bitbucket
+#   BINARIES_DIR_BAMBOO=/app/data/binaries/bamboo
+#   BINARIES_DIR_CROWD=/app/data/binaries/crowd
+#
+# Note: HOST paths go in docker-compose.override.yml volumes,
+#       CONTAINER paths go in .env for the Python app.
 #
 # Example 4: Using Docker volumes instead of bind mounts
 # -------------------------------------------------------
@@ -172,6 +200,7 @@ networks:
 # services:
 #   web:
 #     volumes:
+#       - ./.env:/app/.env
 #       - metadata:/app/data/metadata
 #       - logs:/app/logs
 #       - binaries:/app/data/binaries

@@ -427,78 +427,79 @@ class DownloadManager:
         }
         
         # Add binaries directories
+        # Priority: product-specific dirs > base dir > default dir
+        # Only use base/default if no product-specific dirs exist
         binaries_paths = []
+        product_dirs_exist = False
+
         for product_dir in settings.PRODUCT_STORAGE_MAP.values():
             if os.path.exists(product_dir):
                 binaries_paths.append(product_dir)
-        if os.path.exists(settings.BINARIES_BASE_DIR):
-            binaries_paths.append(settings.BINARIES_BASE_DIR)
-        if os.path.exists(settings.BINARIES_DIR):
-            binaries_paths.append(settings.BINARIES_DIR)
-        # Filter out overlapping paths to prevent double/triple-counting
-        categories['binaries']['paths'] = list(_filter_overlapping_paths(binaries_paths))
+                product_dirs_exist = True
+
+        # Only add base/default dirs if no product-specific dirs found
+        if not product_dirs_exist:
+            if os.path.exists(settings.BINARIES_BASE_DIR):
+                binaries_paths.append(settings.BINARIES_BASE_DIR)
+            elif os.path.exists(settings.BINARIES_DIR):
+                binaries_paths.append(settings.BINARIES_DIR)
+
+        categories['binaries']['paths'] = binaries_paths
 
         # Add descriptions directory
         if os.path.exists(settings.DESCRIPTIONS_DIR):
             categories['descriptions']['paths'].append(settings.DESCRIPTIONS_DIR)
 
-        # Add metadata directory
+        # Add metadata directory (excluding descriptions to avoid double-counting)
         if os.path.exists(settings.METADATA_DIR):
             categories['metadata']['paths'].append(settings.METADATA_DIR)
+            # Mark descriptions as excluded from metadata
+            categories['metadata']['exclude'] = [settings.DESCRIPTIONS_DIR]
 
         # Calculate stats for each category
         for category, data in categories.items():
+            exclude_paths = [os.path.normpath(p) for p in data.get('exclude', [])]
+
             for path in data['paths']:
                 if not os.path.exists(path):
                     continue
-                
+
                 # Get disk drive
                 drive = Path(path).anchor
                 if drive not in data['by_disk']:
                     data['by_disk'][drive] = {'size': 0, 'file_count': 0}
-                
-                # Track individual folders
+
+                # Track this path as a folder entry
                 path_str = str(path)
                 if path_str not in data['folders']:
                     data['folders'][path_str] = {'size': 0, 'file_count': 0, 'drive': drive}
-                
-                # Walk through directory (limit depth for performance)
-                folder_count = 0
+
+                # Walk through directory and accumulate sizes
                 for root, dirs, files in os.walk(path):
-                    # Calculate size for current directory
-                    dir_size = 0
-                    dir_file_count = 0
-                    
+                    # Skip excluded directories
+                    root_normalized = os.path.normpath(root)
+                    should_skip = False
+                    for excl in exclude_paths:
+                        if root_normalized == excl or root_normalized.startswith(excl + os.sep):
+                            should_skip = True
+                            break
+                    if should_skip:
+                        continue
+
                     for file in files:
                         file_path = os.path.join(root, file)
                         try:
                             file_size = os.path.getsize(file_path)
-                            dir_size += file_size
-                            dir_file_count += 1
+                            # Add to category totals
                             data['size'] += file_size
                             data['file_count'] += 1
                             data['by_disk'][drive]['size'] += file_size
                             data['by_disk'][drive]['file_count'] += 1
+                            # Add to this path's folder entry
+                            data['folders'][path_str]['size'] += file_size
+                            data['folders'][path_str]['file_count'] += 1
                         except OSError:
                             pass  # Skip inaccessible files (permissions, deleted, etc.)
-                    
-                    # Store folder stats (only for top-level folders to avoid too much detail)
-                    # Limit number of folders tracked for performance
-                    if folder_count < max_folders:
-                        if root == path or os.path.dirname(root) == path:
-                            folder_key = os.path.basename(root) if root != path else os.path.basename(path)
-                            if folder_key and folder_key not in ['.', '..']:
-                                full_folder_path = root if root != path else path
-                                if full_folder_path not in data['folders']:
-                                    data['folders'][full_folder_path] = {
-                                        'size': dir_size,
-                                        'file_count': dir_file_count,
-                                        'drive': drive
-                                    }
-                                    folder_count += 1
-                                else:
-                                    data['folders'][full_folder_path]['size'] += dir_size
-                                    data['folders'][full_folder_path]['file_count'] += dir_file_count
         
         # Convert to human-readable format
         result = {
